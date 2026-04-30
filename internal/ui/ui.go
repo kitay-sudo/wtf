@@ -215,6 +215,37 @@ func Prompt(reader *bufio.Reader, label, def string) string {
 }
 
 // Choice — выбор одного из вариантов.
+// ChoiceOrCustom — как Choice, но дополнительно позволяет ввести произвольное
+// имя варианта (для случаев "хочу новую модель которой ещё нет в списке").
+// Если ввод не совпал ни с цифрой, ни с именем из options — возвращаем
+// введённое значение как есть.
+func ChoiceOrCustom(reader *bufio.Reader, label string, options []string, def string) string {
+	fmt.Fprintf(os.Stderr, "%s %s\n", colorize(yellow, "?"), label)
+	for i, o := range options {
+		suffix := ""
+		if o == def {
+			suffix = colorize(gray, "  (по умолчанию)")
+		}
+		fmt.Fprintf(os.Stderr, "    %d) %s%s\n", i+1, o, suffix)
+	}
+	hint := fmt.Sprintf("номер 1-%d, своё имя или Enter:", len(options))
+	fmt.Fprintf(os.Stderr, "  %s ", colorize(gray, hint))
+	line, _ := reader.ReadString('\n')
+	v := strings.TrimSpace(line)
+	if v == "" {
+		return def
+	}
+	for i, o := range options {
+		if v == fmt.Sprintf("%d", i+1) {
+			return o
+		}
+		if v == o {
+			return o
+		}
+	}
+	return v // custom value
+}
+
 // Choice — нумерованный выбор. Юзер вводит число (или имя варианта)
 // или жмёт Enter чтобы оставить значение по умолчанию. Дефолт помечается
 // "(по умолчанию)" в строке варианта — никаких стрелочек/курсоров,

@@ -34,11 +34,40 @@ func Default() *Config {
 		Language:        "ru",
 		CacheEnabled:    true,
 		Providers: map[Provider]ProviderConfig{
-			ProviderClaude: {Model: "claude-haiku-4-5-20251001"},
-			ProviderOpenAI: {Model: "gpt-4o-mini"},
-			ProviderGemini: {Model: "gemini-2.0-flash"},
+			ProviderClaude: {Model: KnownModels[ProviderClaude][0]},
+			ProviderOpenAI: {Model: KnownModels[ProviderOpenAI][0]},
+			ProviderGemini: {Model: KnownModels[ProviderGemini][0]},
 		},
 	}
+}
+
+// KnownModels — рекомендуемые модели для каждого провайдера, отсортированные:
+// первая — дефолт (быстрая+дешёвая), дальше — варианты «помощнее»,
+// последняя — «предыдущий поколение / дешевле».
+//
+// Эти списки показываются в `wtf config` wizard'е. Юзер может ввести цифру
+// для выбора из списка, ввести своё имя модели (для precision/edge cases),
+// или нажать Enter чтобы оставить текущее значение.
+var KnownModels = map[Provider][]string{
+	ProviderClaude: {
+		"claude-haiku-4-5-20251001",
+		"claude-sonnet-4-6",
+		"claude-opus-4-7",
+	},
+	ProviderOpenAI: {
+		"gpt-4o-mini",
+		"gpt-4o",
+		"gpt-4.1",
+		"gpt-4.1-mini",
+		"o4-mini",
+	},
+	ProviderGemini: {
+		"gemini-2.0-flash",
+		"gemini-2.0-flash-lite",
+		"gemini-2.5-pro",
+		"gemini-1.5-flash",
+		"gemini-1.5-pro",
+	},
 }
 
 func Dir() (string, error) {

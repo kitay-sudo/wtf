@@ -406,8 +406,10 @@ func runWizard(cfg *config.Config) {
 			ui.OK("ключ сохранён локально (~/.wtf/config.json, mode 0600)")
 		}
 
-		newModel := ui.Prompt(r, "Model", cfg.Model(p))
-		if newModel != "" && newModel != cfg.Model(p) {
+		curModel := cfg.Model(p)
+		known := config.KnownModels[p]
+		newModel := ui.ChoiceOrCustom(r, fmt.Sprintf("Модель для %s", p), known, curModel)
+		if newModel != "" && newModel != curModel {
 			pc := cfg.Providers[p]
 			pc.Model = newModel
 			cfg.Providers[p] = pc

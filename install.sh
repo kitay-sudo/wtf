@@ -20,17 +20,21 @@ INSTALL_DIR="/usr/local/bin"
 BIN_NAME="wtf"
 
 MODE="auto"
-for arg in "$@"; do
-  case "$arg" in
-    --reinstall) MODE="reinstall" ;;
-    --uninstall) MODE="uninstall" ;;
-    -h|--help)
-      sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
-      exit 0
-      ;;
-    *) echo "Неизвестный флаг: $arg" >&2; exit 1 ;;
-  esac
-done
+# Под `set -u` пустой "$@" в for-loop может ругнуться на старых bash —
+# раскрываем явно через ${@:-}, плюс добавляем условие.
+if [[ $# -gt 0 ]]; then
+  for arg in "$@"; do
+    case "$arg" in
+      --reinstall) MODE="reinstall" ;;
+      --uninstall) MODE="uninstall" ;;
+      -h|--help)
+        sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0
+        ;;
+      *) echo "Неизвестный флаг: $arg" >&2; exit 1 ;;
+    esac
+  done
+fi
 
 # ---------- coloring ----------
 if [[ -t 1 ]]; then
