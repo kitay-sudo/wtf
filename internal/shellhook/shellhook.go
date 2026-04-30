@@ -38,15 +38,35 @@ func OutputPath() (string, error) {
 }
 
 func ReadCapture() (*Capture, error) {
-	metaP, err := MetaPath()
+	dir, err := wtfcfg.Dir()
 	if err != nil {
 		return nil, err
 	}
-	meta, err := os.ReadFile(metaP)
+
+	// Если есть свежий last_meta_capture (от wtfc) — читаем его, потому что
+	// last_meta перезатирается каждой следующей prompt-командой (включая wtf).
+	cap := &Capture{Source: "hook"}
+	captureMeta := filepath.Join(dir, "last_meta_capture")
+	regularMeta := filepath.Join(dir, "last_meta")
+
+	chosen := regularMeta
+	if st, err := os.Stat(captureMeta); err == nil {
+		if rst, rerr := os.Stat(regularMeta); rerr == nil {
+			// Берём более свежий из двух.
+			if st.ModTime().After(rst.ModTime()) {
+				chosen = captureMeta
+				cap.Source = "wtfc"
+			}
+		} else {
+			chosen = captureMeta
+			cap.Source = "wtfc"
+		}
+	}
+
+	meta, err := os.ReadFile(chosen)
 	if err != nil {
 		return nil, fmt.Errorf("no last_meta — установи shell-хук: wtf init (%w)", err)
 	}
-	cap := &Capture{Source: "hook"}
 	for _, line := range strings.Split(string(meta), "\n") {
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
@@ -126,52 +146,26 @@ func detectCurrentShell() string {
 	return "/bin/sh"
 }
 
-// Bash-хук: захват stdout+stderr через `script(1)`.
+// Bash-хук: пишет в last_meta команду и exit-код после каждой команды,
+// плюс предоставляет функцию-обёртку '?>' для явного захвата stdout/stderr.
 //
-// Принцип: на preexec мы оборачиваем команду в `script -qec '<cmd>' <file>`,
-// которое пишет ВСЁ что появилось в терминале в файл. После команды
-// просто читаем этот файл — это ровно то, что увидел юзер.
+// Идеология: захватить вывод произвольной команды через DEBUG trap+tee
+// в bash оказалось ненадёжно (DEBUG срабатывает на подкоманды,
+// race с асинхронным tee, ломаются TUI). Поэтому даём явный
+// контроль юзеру:
+//   $ ?> service nginx status   # обёртка пишет stdout+stderr в last_output
+//   $ wtf                        # читает захваченный вывод
 //
-// Для TUI команд (vim, less, htop, top, htop, ssh, man, tmux) обёртка не
-// применяется — `script` ломает их TTY. Команда в whitelist выполняется
-// напрямую без захвата; в этом случае wtf для неё не сработает (но это
-// редкий и осознанный кейс).
-//
-// Реализация: через `__wtf_run` функцию + alias на саму команду тяжело
-// (надо переписывать всё что юзер вводит). Поэтому используем `command_not_found_handle`?
-// — нет, она только для несуществующих.
-//
-// Решение проще: завернуть весь PROMPT_COMMAND-цикл так, чтобы каждая команда
-// шла через preexec → DEBUG trap → script wrapper. Это делается через
-// `BASH_COMMAND` в DEBUG trap + `BASH_SUBSHELL == 0` (главный shell).
-//
-// На практике bash не позволяет красиво "перехватить и обернуть" вводимую
-// команду. Поэтому идём другим путём: захватываем ВЕСЬ stdout/stderr
-// сессии bash через единственный `exec >(tee …) 2>&1`, плюс маркируем
-// границы команд через `printf '\n___WTF_MARK_<ts>___\n'` в preexec.
-// При вызове `wtf` мы режем файл по последнему маркеру и берём то, что
-// после него. Это работает с любой командой, не ломает TUI (tee не виноват
-// в TTY-обращении), и правда захватывает всё что было показано на экране.
-const bashHook = `# wtf shell hook (bash) — capture stdout/stderr via tee
+// Альтернатива без обёртки — pipe: 'service nginx status 2>&1 | wtf'.
+const bashHook = `# wtf shell hook (bash)
 __wtf_dir="$HOME/.wtf"
 __wtf_capture="$__wtf_dir/last_output"
 __wtf_meta="$__wtf_dir/last_meta"
-__wtf_session="$__wtf_dir/session.log"
 __wtf_cmd=""
 mkdir -p "$__wtf_dir"
 
-# Захватываем весь stdout/stderr сессии в session.log через подоболочку с tee.
-# Дублируется на терминал юзера (он не замечает разницы) и одновременно пишется
-# в файл. Делается ОДИН раз на сессию — никаких накладных расходов на команду.
-if [ -z "${__WTF_TEE_ACTIVE:-}" ]; then
-  export __WTF_TEE_ACTIVE=1
-  exec > >(tee -a "$__wtf_session") 2>&1
-fi
-
 __wtf_preexec() {
   __wtf_cmd="$BASH_COMMAND"
-  # Маркер между командами — по нему режем session.log при чтении.
-  printf '\n___WTF_MARK_%s___\n' "$(date +%s%N)" >&2
   printf 'cmd=%s\nexit=0\nts=%s\n' "$__wtf_cmd" "$(date +%s)" > "$__wtf_meta"
 }
 trap '__wtf_preexec' DEBUG
@@ -180,37 +174,37 @@ __wtf_precmd() {
   local ec=$?
   if [ -n "$__wtf_cmd" ]; then
     printf 'cmd=%s\nexit=%s\nts=%s\n' "$__wtf_cmd" "$ec" "$(date +%s)" > "$__wtf_meta"
-    # Извлекаем вывод последней команды: всё после последнего маркера.
-    if [ -f "$__wtf_session" ]; then
-      awk 'BEGIN{out=""} /___WTF_MARK_[0-9]+___/{out=""; next} {out=out $0 "\n"} END{printf "%s", out}' "$__wtf_session" > "$__wtf_capture"
-    fi
-    # Подрезаем session.log если он вырос больше 1MB — оставляем только хвост.
-    if [ -f "$__wtf_session" ] && [ "$(wc -c < "$__wtf_session")" -gt 1048576 ]; then
-      tail -c 524288 "$__wtf_session" > "$__wtf_session.tmp" && mv "$__wtf_session.tmp" "$__wtf_session"
-    fi
   fi
 }
 case ";${PROMPT_COMMAND};" in
   *";__wtf_precmd;"*) ;;
   *) PROMPT_COMMAND="__wtf_precmd;${PROMPT_COMMAND}" ;;
 esac
+
+# Префикс-обёртка: 'wtfc <команда>' выполняет команду и захватывает её
+# stdout+stderr в ~/.wtf/last_output, чтобы потом 'wtf' их прочитал.
+# Использует 'tee', не ломает интерактивные TUI.
+wtfc() {
+  if [ "$#" -eq 0 ]; then
+    printf 'usage: wtfc <команда>\n  захватывает stdout+stderr команды в ~/.wtf/last_output,\n  затем напиши: wtf\n' >&2
+    return 2
+  fi
+  local cmd_str="$*"
+  "$@" 2>&1 | tee "$__wtf_capture"
+  local ec=${PIPESTATUS[0]}
+  # Пишем в last_meta_capture чтобы prompt-hook не перезатёр после wtfc.
+  printf 'cmd=%s\nexit=%s\nts=%s\n' "$cmd_str" "$ec" "$(date +%s)" > "$__wtf_dir/last_meta_capture"
+  return "$ec"
+}
 `
 
-// Zsh-хук: тот же принцип через add-zsh-hook + tee.
-const zshHook = `# wtf shell hook (zsh) — capture stdout/stderr via tee
+const zshHook = `# wtf shell hook (zsh)
 __wtf_dir="$HOME/.wtf"
-__wtf_meta="$__wtf_dir/last_meta"
 __wtf_capture="$__wtf_dir/last_output"
-__wtf_session="$__wtf_dir/session.log"
+__wtf_meta="$__wtf_dir/last_meta"
 mkdir -p "$__wtf_dir"
 
-if [ -z "${__WTF_TEE_ACTIVE:-}" ]; then
-  export __WTF_TEE_ACTIVE=1
-  exec > >(tee -a "$__wtf_session") 2>&1
-fi
-
 __wtf_preexec() {
-  printf '\n___WTF_MARK_%s___\n' "$(date +%s%N)" >&2
   print -r -- "cmd=$1" > "$__wtf_meta"
   print -r -- "exit=0" >> "$__wtf_meta"
   print -r -- "ts=$(date +%s)" >> "$__wtf_meta"
@@ -222,42 +216,53 @@ __wtf_precmd() {
   print -r -- "cmd=$cmd" > "$__wtf_meta"
   print -r -- "exit=$ec" >> "$__wtf_meta"
   print -r -- "ts=$(date +%s)" >> "$__wtf_meta"
-  if [ -f "$__wtf_session" ]; then
-    awk 'BEGIN{out=""} /___WTF_MARK_[0-9]+___/{out=""; next} {out=out $0 "\n"} END{printf "%s", out}' "$__wtf_session" > "$__wtf_capture"
-  fi
-  if [ -f "$__wtf_session" ] && [ "$(wc -c < "$__wtf_session")" -gt 1048576 ]; then
-    tail -c 524288 "$__wtf_session" > "$__wtf_session.tmp" && mv "$__wtf_session.tmp" "$__wtf_session"
-  fi
 }
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec __wtf_preexec
 add-zsh-hook precmd __wtf_precmd
+
+# Префикс-обёртка: 'wtfc <команда>' захватывает вывод в ~/.wtf/last_output.
+wtfc() {
+  if [ "$#" -eq 0 ]; then
+    print -r -- "usage: wtfc <команда>" >&2
+    return 2
+  fi
+  local cmd_str="$*"
+  "$@" 2>&1 | tee "$__wtf_capture"
+  local ec=${pipestatus[1]}
+  print -r -- "cmd=$cmd_str" > "$__wtf_dir/last_meta_capture"
+  print -r -- "exit=$ec" >> "$__wtf_dir/last_meta_capture"
+  print -r -- "ts=$(date +%s)" >> "$__wtf_dir/last_meta_capture"
+  return "$ec"
+}
 `
 
-const fishHook = `# wtf shell hook (fish) — capture stdout/stderr via tee
+const fishHook = `# wtf shell hook (fish)
 set -g __wtf_dir "$HOME/.wtf"
 set -g __wtf_meta "$__wtf_dir/last_meta"
 set -g __wtf_capture "$__wtf_dir/last_output"
-set -g __wtf_session "$__wtf_dir/session.log"
 mkdir -p $__wtf_dir
 
-if not set -q __WTF_TEE_ACTIVE
-    set -gx __WTF_TEE_ACTIVE 1
-    # fish не поддерживает 'exec >' напрямую — делаем через bash exec hack
-    # (этот функционал в fish ограниченнее, для надёжности рекомендуем pipe-режим)
-end
-
 function __wtf_preexec --on-event fish_preexec
-    printf '\n___WTF_MARK_%s___\n' (date +%s%N) >&2
     printf 'cmd=%s\nexit=0\nts=%s\n' "$argv" (date +%s) > $__wtf_meta
 end
 
 function __wtf_postexec --on-event fish_postexec
     set -l ec $status
     printf 'cmd=%s\nexit=%s\nts=%s\n' "$argv" $ec (date +%s) > $__wtf_meta
-    if test -f $__wtf_session
-        awk 'BEGIN{out=""} /___WTF_MARK_[0-9]+___/{out=""; next} {out=out $0 "\n"} END{printf "%s", out}' $__wtf_session > $__wtf_capture
+end
+
+# Префикс-обёртка для fish.
+function wtfc
+    if test (count $argv) -eq 0
+        echo "usage: wtfc <команда>" >&2
+        return 2
     end
+    set -l cmd_str (string join " " $argv)
+    $argv 2>&1 | tee $__wtf_capture
+    set -l ec $pipestatus[1]
+    printf 'cmd=%s\nexit=%s\nts=%s\n' "$cmd_str" $ec (date +%s) > $__wtf_dir/last_meta_capture
+    return $ec
 end
 `
 
