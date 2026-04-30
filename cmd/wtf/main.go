@@ -5,9 +5,12 @@ import (
 	stdctx "context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/bitcoff/wtf/internal/cache"
 	"github.com/bitcoff/wtf/internal/config"
@@ -45,10 +48,11 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Print(`wtf [!?] — объяснялка ошибок через AI
+	fmt.Print(`wtf [!?] — AI-объяснялка для терминала
 
 Использование:
-  wtf                        объяснить последнюю ошибку
+  wtf                        объяснить последний вывод (через shell-хук)
+  <команда> 2>&1 | wtf       запайпить вывод напрямую — самый надёжный способ
   wtf --rerun                перезапустить последнюю команду и объяснить
   wtf --explain "<text>"     объяснить переданный текст
   wtf --provider <name>      разово выбрать провайдера (claude|openai|gemini)
@@ -99,6 +103,28 @@ func runExplain(args []string) {
 	switch {
 	case *explain != "":
 		cap = &shellhook.Capture{Output: *explain, Source: "flag"}
+	case hasPipedStdin():
+		// `<команда> 2>&1 | wtf` — самый надёжный способ передать вывод.
+		// Если stdin не-TTY но пустой (например, `wtf </dev/null` или запуск
+		// из cron) — не выходим с ошибкой, проваливаемся в обычный flow
+		// чтения хука, как будто стдина не было.
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			ui.Err(fmt.Sprintf("чтение stdin: %v", err))
+			os.Exit(1)
+		}
+		if len(strings.TrimSpace(string(data))) == 0 {
+			c, hookErr := shellhook.ReadCapture()
+			if hookErr != nil {
+				ui.Warn(hookErr.Error())
+				ui.Info("совет: установи хук — wtf init")
+				ui.Info("или запайпь вывод: <команда> 2>&1 | wtf")
+				os.Exit(2)
+			}
+			cap = c
+			break
+		}
+		cap = &shellhook.Capture{Output: string(data), Source: "pipe"}
 	case *rerun:
 		meta, _ := shellhook.ReadCapture()
 		if meta == nil || meta.Command == "" {
@@ -124,14 +150,19 @@ func runExplain(args []string) {
 		cap = c
 	}
 
-	if strings.TrimSpace(cap.Output) == "" && cap.ExitCode == 0 && cap.Command != "" {
-		ui.Info("вывод пустой и exit=0 — запускаю --rerun чтобы поймать ошибку")
-		c, err := shellhook.Rerun(cap.Command)
-		if err != nil {
-			ui.Err(fmt.Sprintf("rerun: %v", err))
-			os.Exit(1)
-		}
-		cap = c
+	if strings.TrimSpace(cap.Output) == "" && cap.Command != "" {
+		// Хук пока пишет только metadata (cmd + exit). Сам stdout/stderr
+		// он не сохраняет — на это нужен `script(1)`-обёртка, она в roadmap.
+		// Поэтому здесь — внятное сообщение, а не silent rerun: rerun небезопасен
+		// для side-effect команд (rm, kubectl apply, git push) и виснет на pager'ах.
+		ui.Warn("вывод последней команды не захвачен")
+		ui.Info(fmt.Sprintf("команда: %s", cap.Command))
+		fmt.Fprintln(os.Stderr)
+		ui.Info("варианты:")
+		fmt.Fprintln(os.Stderr, "    wtf --rerun                       перезапустить последнюю команду (если она безопасна)")
+		fmt.Fprintln(os.Stderr, "    <команда> 2>&1 | wtf              запайпить вывод напрямую")
+		fmt.Fprintln(os.Stderr, "    wtf --explain \"<текст>\"           передать текст вручную")
+		os.Exit(2)
 	}
 
 	info := wctx.Collect()
@@ -223,6 +254,12 @@ func runExplain(args []string) {
 
 	fmt.Println()
 	fmt.Println(render.Markdown(answer))
+}
+
+// hasPipedStdin — true если stdin это пайп/файл, не интерактивный терминал.
+// Используется для поддержки `<команда> 2>&1 | wtf` без явных флагов.
+func hasPipedStdin() bool {
+	return !term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 func anyKeyConfigured(cfg *config.Config) bool {
