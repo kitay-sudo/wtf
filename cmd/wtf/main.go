@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -63,6 +64,7 @@ func printHelp() {
 
 Команды:
   wtf init [shell]           установить shell-хук (bash|zsh|fish|powershell)
+                             добавь --no-reload чтобы не запускать новый shell
   wtf config                 интерактивная настройка (провайдер, ключи, модели)
   wtf config show            показать текущий конфиг
   wtf config set k=v         задать значение
@@ -306,9 +308,13 @@ func nz(s string) string {
 }
 
 func runInit(args []string) {
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	noReload := fs.Bool("no-reload", false, "не запускать новый shell после установки")
+	_ = fs.Parse(args)
+
 	var s shellhook.Shell
-	if len(args) > 0 {
-		s = shellhook.Shell(args[0])
+	if fs.NArg() > 0 {
+		s = shellhook.Shell(fs.Arg(0))
 	} else {
 		s = shellhook.DetectInstall()
 		ui.Info(fmt.Sprintf("обнаружен shell: %s", s))
@@ -319,21 +325,100 @@ func runInit(args []string) {
 		os.Exit(1)
 	}
 	ui.OK(fmt.Sprintf("shell-хук установлен в %s", rc))
-	ui.Info("перезапусти shell или выполни:")
-	switch s {
-	case shellhook.ShellBash:
-		fmt.Fprintln(os.Stderr, "    source ~/.bashrc")
-	case shellhook.ShellZsh:
-		fmt.Fprintln(os.Stderr, "    source ~/.zshrc")
-	case shellhook.ShellFish:
-		fmt.Fprintln(os.Stderr, "    source ~/.config/fish/conf.d/wtf.fish")
-	case shellhook.ShellPowerShell:
-		fmt.Fprintln(os.Stderr, "    . $PROFILE")
-	}
+
 	cfg, _ := config.Load()
 	if !anyKeyConfigured(cfg) {
 		ui.Warn("API ключ не настроен. Запусти: wtf config")
 	}
+
+	if *noReload {
+		ui.Info("перезапусти shell или выполни:")
+		fmt.Fprintln(os.Stderr, "    "+reloadCommand(s))
+		return
+	}
+
+	// Авто-подгрузка через exec — заменяем процесс `wtf init` на свежий interactive
+	// shell, который сам прочитает обновлённый rc. Юзер не делает руками source.
+	// Не работает на Windows для unix-shell'ов и в неинтерактивных контекстах
+	// (например `wtf init` запущен из install.sh через pipe).
+	if !canExecReload(s) {
+		ui.Info("перезапусти shell или выполни:")
+		fmt.Fprintln(os.Stderr, "    "+reloadCommand(s))
+		return
+	}
+
+	ui.OK("перезапускаю shell с активным хуком — пиши `wtfc <команда>` или `exit` чтобы выйти")
+	fmt.Fprintln(os.Stderr)
+	if err := execReload(s); err != nil {
+		ui.Warn(fmt.Sprintf("не удалось авто-перезапустить shell: %v", err))
+		ui.Info("выполни вручную: " + reloadCommand(s))
+	}
+}
+
+// canExecReload — можно ли перезапустить shell автоматически.
+// Условия: stdin/stdout/stderr — TTY, исполняемый файл shell найден, ОС
+// поддерживается. Запуск из неинтерактивного pipe (например 'curl … | bash → wtf init')
+// исключён, иначе shell стартует и тут же выйдет.
+func canExecReload(s shellhook.Shell) bool {
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return false
+	}
+	bin := shellBinary(s)
+	if bin == "" {
+		return false
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		return false
+	}
+	return true
+}
+
+// execReload запускает новый interactive shell, унаследовав stdin/stdout/stderr.
+// `wtf init` ждёт его выхода, потом сам завершается. Когда юзер делает `exit` —
+// он попадает обратно в исходный shell (в котором хук ещё не загружен, но новые
+// окна терминала будут стартовать с хуком из rc-файла).
+func execReload(s shellhook.Shell) error {
+	bin := shellBinary(s)
+	args := []string{"-i"} // -i = interactive
+	if s == shellhook.ShellPowerShell {
+		args = []string{"-NoExit"}
+	}
+	c := exec.Command(bin, args...)
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
+}
+
+func shellBinary(s shellhook.Shell) string {
+	switch s {
+	case shellhook.ShellBash:
+		return "bash"
+	case shellhook.ShellZsh:
+		return "zsh"
+	case shellhook.ShellFish:
+		return "fish"
+	case shellhook.ShellPowerShell:
+		if _, err := exec.LookPath("pwsh"); err == nil {
+			return "pwsh"
+		}
+		return "powershell"
+	}
+	return ""
+}
+
+func reloadCommand(s shellhook.Shell) string {
+	switch s {
+	case shellhook.ShellBash:
+		return "source ~/.bashrc"
+	case shellhook.ShellZsh:
+		return "source ~/.zshrc"
+	case shellhook.ShellFish:
+		return "source ~/.config/fish/conf.d/wtf.fish"
+	case shellhook.ShellPowerShell:
+		return ". $PROFILE"
+	}
+	return ""
 }
 
 func runConfig(args []string) {
