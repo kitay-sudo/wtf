@@ -38,7 +38,7 @@ export default function AnnouncementBar() {
         </span>
         <span className="text-zinc-300">
           <span className="text-zinc-500 font-mono mr-2 hidden sm:inline">[ad]</span>
-          Поднимаешь сервер для <code className="font-mono text-amber-300">wtf</code>?{' '}
+          Нужен сервер для своих сервисов?{' '}
           <a
             href={REF_URL}
             target="_blank"
@@ -48,7 +48,7 @@ export default function AnnouncementBar() {
             Timeweb Cloud
             <ArrowRight size={12} />
           </a>{' '}
-          <span className="text-zinc-500">— по нашей ссылке поможем с настройкой.</span>
+          <span className="text-zinc-500">— VPS, которым пользуемся сами. Поможем с настройкой.</span>
         </span>
         <button
           onClick={close}

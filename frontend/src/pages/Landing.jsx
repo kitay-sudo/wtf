@@ -788,8 +788,8 @@ function Support() {
               Поддержать проект
             </h2>
             <p className="mt-4 text-zinc-400 leading-relaxed max-w-xl mx-auto">
-              wtf пилится в свободное время, без подписок и платных тарифов. Если он
-              сэкономил тебе пару часов — поддержать можно тремя способами ниже.
+              wtf пилится в свободное время, без подписок и платных тарифов.
+              Если он сэкономил тебе пару часов и хочется отблагодарить — буду рад крипто-донату.
               Деньги идут на новые провайдеры, ускорение релизов и время на доведение
               фич из roadmap.
             </p>
@@ -803,24 +803,16 @@ function Support() {
           </div>
         </Reveal>
 
-        <Reveal delay={0.08}>
-          <TimewebCard />
-        </Reveal>
-
-        <Reveal delay={0.12}>
-          <div className="mt-6 text-center">
-            <p className="text-xs uppercase tracking-widest text-zinc-500 font-mono">
-              или криптой напрямую
-            </p>
-          </div>
-        </Reveal>
-
-        <Reveal delay={0.15}>
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Reveal delay={0.1}>
+          <div className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-4">
             {wallets.map((w, i) => (
               <WalletCard key={w.label} {...w} delay={i * 0.05} />
             ))}
           </div>
+        </Reveal>
+
+        <Reveal delay={0.18}>
+          <TimewebCard />
         </Reveal>
 
         <Reveal delay={0.15}>
@@ -1055,12 +1047,10 @@ function HonorCard({ donor }) {
   );
 }
 
-// TimewebCard — отдельный способ поддержать проект, который НИЧЕГО не стоит юзеру:
-// он регистрируется по нашей реф-ссылке (получает свой сервер),
-// мы получаем небольшую партнёрскую комиссию.
-//
-// Disclosure прямо в карточке: "партнёрская ссылка". Никаких маскировок —
-// эта секция и так помечена как способ поддержки, юзер понимает контекст.
+// TimewebCard — личная рекомендация хостинга. Пользователь приходит сюда
+// потому что ему нужен VPS, а не потому что мы просим. Бейдж "ad" остаётся
+// для честности (это партнёрская ссылка по требованиям FTC/ФЗ "О рекламе"),
+// но сам месседж — про то что хостинг хороший.
 function TimewebCard() {
   return (
     <div className="mt-10 rounded-2xl border border-amber-400/30 bg-gradient-to-br from-amber-400/10 via-zinc-900/60 to-zinc-900/40 p-6 md:p-7">
@@ -1071,15 +1061,13 @@ function TimewebCard() {
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1.5">
             <h3 className="text-base md:text-lg font-semibold text-zinc-100">
-              Поднять сервер на Timeweb Cloud
+              VPS, который мы используем сами
             </h3>
             <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-zinc-700 bg-zinc-900/60 text-[10px] uppercase tracking-widest font-mono text-zinc-400">
-              партнёрская ссылка
+              ad
             </span>
           </div>
           <p className="text-sm text-zinc-400 leading-relaxed">
-            Самый честный способ поддержать проект — без расходов из своего кармана.
-            Регистрируешься на{' '}
             <a
               href="https://timeweb.cloud/?i=104289"
               target="_blank"
@@ -1088,9 +1076,14 @@ function TimewebCard() {
             >
               Timeweb Cloud
             </a>{' '}
-            по нашей ссылке, получаешь VPS под свои задачи — и нам тоже капает
-            небольшая комиссия. В качестве бонуса —{' '}
-            <span className="text-zinc-200">помощь с настройкой сервера</span>:
+            — российский хостинг, на котором живут наши боевые сервера: быстрая
+            панель, NVMe-диски, развёртывание VPS за минуту, оплата картой и
+            крипто-кошельком. Ровно то, что нужно когда ты деплоишь свои сервисы
+            и хочешь чтобы wtf работал по SSH без задержек.
+          </p>
+          <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
+            Берёшь сервер — могу{' '}
+            <span className="text-zinc-200">помочь с первичной настройкой</span>:
             напиши в Telegram{' '}
             <a
               href="https://t.me/kitay9"
@@ -1100,13 +1093,13 @@ function TimewebCard() {
             >
               @kitay9
             </a>{' '}
-            — подскажу с конфигом, файрволом, деплоем своих сервисов.
+            — подскажу с конфигом, файрволом, systemd, деплоем своих сервисов.
           </p>
           <a
             href="https://timeweb.cloud/?i=104289"
             target="_blank"
             rel="sponsored noopener"
-            className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-zinc-950 transition-colors"
+            className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-zinc-950 transition-colors"
           >
             Перейти к Timeweb Cloud
             <ArrowRight size={14} />
