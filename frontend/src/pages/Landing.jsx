@@ -40,7 +40,6 @@ export default function Landing() {
       <WhyName />
       <LogosStrip />
       <Features />
-      <Versus />
       <HowItWorks />
       <DemoSection />
       <FAQ />
@@ -141,7 +140,7 @@ function Hero() {
 
         <Reveal delay={0.05}>
           <h1 className="mt-6 text-center text-4xl md:text-6xl font-semibold tracking-tight leading-[1.05]">
-            Упал в терминале — пиши <br />
+            Не понял что в терминале — пиши <br />
             <span className="inline-flex items-center gap-3 align-middle">
               <span className="bg-gradient-to-r from-amber-400 to-yellow-300 bg-clip-text text-transparent">
                 wtf
@@ -153,7 +152,7 @@ function Hero() {
 
         <Reveal delay={0.08}>
           <p className="mt-6 text-center text-lg md:text-xl text-zinc-200 max-w-2xl mx-auto leading-relaxed font-medium">
-            Любая ошибка — stack trace, nginx 502, npm падает, docker не стартует — пиши <code className="font-mono text-amber-300">wtf</code> и получай человеческое объяснение и 2-3 варианта фикса прямо в терминале.
+            Любой непонятный вывод — упавший stack trace, status сервиса, дамп конфига, странный JSON, лог nginx — пиши <code className="font-mono text-amber-300">wtf</code> и получай человеческое объяснение прямо в терминале. Если есть что чинить — ещё и 2-3 готовых действия.
           </p>
         </Reveal>
 
@@ -278,25 +277,27 @@ function WhyName() {
 
         <Reveal delay={0.1}>
           <p className="mt-6 text-zinc-400 leading-relaxed md:text-lg">
-            Это первое, что ты пишешь, когда падает что-то непонятное в терминале.
-            Раньше — копировал ошибку в Google или ChatGPT, тратил минуты.
+            Это первое, что ты пишешь, когда в терминале что-то непонятное —
+            упавшая команда, длинный статус сервиса, дамп конфига, незнакомый JSON.
+            Раньше — копировал в Google или ChatGPT, тратил минуты.
             Теперь — просто <code className="font-mono text-amber-300">wtf</code>.
           </p>
         </Reveal>
 
         <Reveal delay={0.15}>
           <p className="mt-4 text-zinc-400 leading-relaxed md:text-lg">
-            Утилита читает последний вывод терминала, добавляет контекст
+            Утилита читает последний вывод терминала (stdout + stderr), добавляет контекст
             (ОС, shell, package manager, git branch), вычищает секреты и спрашивает у AI.
-            На выходе — короткое объяснение и 2-3 варианта починить, прямо в терминале.
+            На выходе — короткое объяснение того, что произошло, и при необходимости
+            2-3 готовых действия.
           </p>
         </Reveal>
 
         <Reveal delay={0.2}>
           <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { sym: 'sec', label: 'Секунды', desc: 'От падения команды до объяснения — две-три секунды. Без копипастов.' },
-              { sym: 'any', label: 'Любой стек', desc: 'Go, Node, Python, Rust, nginx, docker, kubectl, терраформ — всё, что пишет в stderr.' },
+              { sym: 'sec', label: 'Секунды', desc: 'От команды до объяснения — две-три секунды. Без копипастов в браузер.' },
+              { sym: 'any', label: 'Любой вывод', desc: 'stack traces, status сервисов, конфиги, JSON, логи — всё что попадает в твой терминал.' },
               { sym: 'safe', label: 'Без утечек', desc: 'Перед отправкой regex-фильтр чистит токены, JWT, пароли, email и абсолютные пути.' },
             ].map((v) => (
               <div
@@ -347,7 +348,7 @@ function Features() {
     {
       icon: Terminal,
       title: 'Любой shell',
-      description: 'bash, zsh, fish, PowerShell. wtf init ставит хук — после этого захват последней ошибки идёт автоматически.',
+      description: 'bash, zsh, fish, PowerShell. wtf init ставит хук — после этого захват последнего вывода идёт автоматически.',
     },
     {
       icon: Zap,
@@ -362,7 +363,7 @@ function Features() {
     {
       icon: Layers,
       title: 'Локальный кеш',
-      description: 'SHA-256 по нормализованной ошибке + provider + язык. Та же ошибка второй раз — мгновенный ответ без обращения к API.',
+      description: 'SHA-256 по нормализованному выводу + provider + язык. Тот же вывод второй раз — мгновенный ответ без обращения к API.',
     },
     {
       icon: Lock,
@@ -407,112 +408,6 @@ function Features() {
             <FeatureCard key={f.title} {...f} delay={i * 0.05} />
           ))}
         </div>
-      </div>
-    </section>
-  );
-}
-
-function Versus() {
-  const rows = [
-    {
-      label: 'Что делает',
-      wtf: 'Объясняет последнюю ошибку и предлагает фикс через AI',
-      tldr: 'Показывает «человеческий» help для команды (man-страница в кратком виде)',
-      thefuck: 'Угадывает что ты опечатался и предлагает фикс из словаря правил',
-    },
-    {
-      label: 'AI / нейросеть',
-      wtf: 'Да — Claude, GPT-4o или Gemini на выбор',
-      tldr: 'Нет — статические community-страницы',
-      thefuck: 'Нет — хардкод правил в Python',
-    },
-    {
-      label: 'Понимает контекст',
-      wtf: 'Да — реальный stderr, exit code, OS, shell, git branch',
-      tldr: 'Нет — только название команды',
-      thefuck: 'Частично — только последняя командная строка',
-    },
-    {
-      label: 'Работает с любой ошибкой',
-      wtf: 'Да — раз ошибка ушла в stderr, AI её разберёт',
-      tldr: 'Нет — только команды, для которых есть страница',
-      thefuck: 'Нет — только то, что описано правилом',
-    },
-    {
-      label: 'Защита секретов',
-      wtf: 'Да — regex-фильтр перед отправкой в API',
-      tldr: 'N/A',
-      thefuck: 'N/A',
-    },
-    {
-      label: 'Стоимость',
-      wtf: 'Цена API-вызова (Haiku — копейки)',
-      tldr: 'Бесплатно',
-      thefuck: 'Бесплатно',
-    },
-  ];
-
-  return (
-    <section className="relative py-24 md:py-32 border-t border-zinc-900/80 overflow-hidden">
-      <div className="relative max-w-6xl mx-auto px-5">
-        <Reveal>
-          <div className="text-center max-w-2xl mx-auto">
-            <SectionDivider symbol="vs" label="The Comparison" />
-            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
-              wtf vs tldr / thefuck
-            </h2>
-            <p className="mt-4 text-zinc-400 leading-relaxed">
-              tldr и thefuck — отличные тулы, но решают другую задачу.
-              wtf — это про <span className="text-zinc-200">«объясни мне эту конкретную ошибку, которая прямо сейчас в терминале»</span>,
-              чего ни один из старых инструментов не делает.
-            </p>
-          </div>
-        </Reveal>
-
-        <Reveal delay={0.15}>
-          <div className="mt-10 overflow-x-auto rounded-2xl border border-zinc-900/80">
-            <div className="min-w-[720px] divide-y divide-zinc-900/80">
-              <div className="grid grid-cols-[180px_1fr_1fr_1fr] bg-zinc-950/60">
-                <div className="px-5 py-3" />
-                <div className="px-5 py-3 text-xs uppercase tracking-wider text-amber-400 font-semibold border-l border-zinc-900/80">
-                  wtf
-                </div>
-                <div className="px-5 py-3 text-xs uppercase tracking-wider text-zinc-400 font-semibold border-l border-zinc-900/80">
-                  tldr
-                </div>
-                <div className="px-5 py-3 text-xs uppercase tracking-wider text-zinc-400 font-semibold border-l border-zinc-900/80">
-                  thefuck
-                </div>
-              </div>
-              {rows.map((r) => (
-                <div
-                  key={r.label}
-                  className="grid grid-cols-[180px_1fr_1fr_1fr] bg-zinc-950"
-                >
-                  <div className="px-5 py-4 text-xs uppercase tracking-wider text-zinc-500 font-medium flex items-center">
-                    {r.label}
-                  </div>
-                  <div className="px-5 py-4 text-sm text-zinc-200 leading-relaxed border-l border-zinc-900/80">
-                    {r.wtf}
-                  </div>
-                  <div className="px-5 py-4 text-sm text-zinc-400 leading-relaxed border-l border-zinc-900/80">
-                    {r.tldr}
-                  </div>
-                  <div className="px-5 py-4 text-sm text-zinc-400 leading-relaxed border-l border-zinc-900/80">
-                    {r.thefuck}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Reveal>
-
-        <Reveal delay={0.2}>
-          <p className="mt-8 text-center text-sm text-zinc-500 max-w-2xl mx-auto leading-relaxed">
-            Все три могут жить рядом. tldr — когда ты не помнишь синтаксис.
-            thefuck — когда опечатался. wtf — когда оно упало и непонятно почему.
-          </p>
-        </Reveal>
       </div>
     </section>
   );
@@ -601,12 +496,12 @@ function DemoSection() {
             Как выглядит ответ
           </h2>
           <p className="mt-4 text-zinc-400 leading-relaxed">
-            Одно предложение про то, что случилось. 2-3 варианта починить с готовыми
-            командами для копирования. Опционально — короткое «почему» и одна ссылка на доку,
-            если она реально есть. Без воды и переливания из пустого.
+            Одно предложение про то, что произошло или что показывает вывод. Если есть что
+            делать — 2-3 готовые команды для копирования. Опционально — короткое «почему»
+            и одна ссылка на доку, если она реально есть. Без воды и переливания из пустого.
           </p>
           <p className="mt-3 text-zinc-500 leading-relaxed text-sm">
-            На повторных одинаковых ошибках срабатывает локальный кеш и ответ приходит мгновенно.
+            На повторных одинаковых запросах срабатывает локальный кеш и ответ приходит мгновенно.
           </p>
         </Reveal>
       </div>
@@ -618,11 +513,15 @@ function FAQ() {
   const items = [
     {
       q: 'Как wtf вообще читает, что у меня было в терминале?',
-      a: 'Через shell-хук: wtf init добавляет небольшой preexec/precmd-хук в .zshrc / .bashrc / fish config / PowerShell profile. Хук пишет последнюю команду и её exit-код в ~/.wtf/last_meta. При вызове wtf утилита читает этот файл, и если в нём есть свежий fail — отправляет вывод в AI. Если хука нет или вывод пустой — wtf может перезапустить последнюю команду (--rerun) и поймать stderr. Также можно явно: wtf --explain "<текст ошибки>".',
+      a: 'Через shell-хук: wtf init добавляет небольшой preexec/precmd-хук в .zshrc / .bashrc / fish config / PowerShell profile. Хук пишет последнюю команду и её exit-код в ~/.wtf/last_meta. При вызове wtf утилита читает этот файл и отправляет вывод в AI — независимо от того, упало оно или просто хочется разобраться. Если хука нет или вывод пустой — wtf может перезапустить последнюю команду (--rerun) и поймать stdout/stderr. Также можно явно: wtf --explain "<любой текст>".',
+    },
+    {
+      q: 'Это работает только с ошибками?',
+      a: 'Нет. wtf берёт последний вывод терминала независимо от exit-кода. Хочешь разобраться, что показывает systemctl status nginx или что внутри длинного JSON от curl — пиши wtf, объяснит. Для упавших команд дополнительно идут 2-3 варианта починить.',
     },
     {
       q: 'Это правда полностью open-source? Никаких подписок?',
-      a: 'Да. Один Go-бинарь, MIT-лицензия. Нет своего бэкенда, нет аккаунтов, нет телеметрии. Запросы идут напрямую в API провайдера на твой ключ. Платишь только за API-вызовы (Claude Haiku — копейки за разбор одной ошибки).',
+      a: 'Да. Один Go-бинарь, MIT-лицензия. Нет своего бэкенда, нет аккаунтов, нет телеметрии. Запросы идут напрямую в API провайдера на твой ключ. Платишь только за API-вызовы.',
     },
     {
       q: 'Какой провайдер лучше выбрать?',
@@ -642,7 +541,7 @@ function FAQ() {
     },
     {
       q: 'Можно ли работать офлайн?',
-      a: 'Не полностью. AI-провайдеры все в облаке. Но ответы кешируются по хешу ошибки в ~/.wtf/cache/, так что повторные одинаковые падения показывают мгновенно из кеша без сети. Self-hosted режим через ollama в roadmap.',
+      a: 'Не полностью. AI-провайдеры все в облаке. Но ответы кешируются по хешу вывода в ~/.wtf/cache/, так что повторные одинаковые запросы возвращаются мгновенно из кеша без сети. Self-hosted режим через ollama в roadmap.',
     },
     {
       q: 'Сколько это в RAM/диск?',
@@ -690,7 +589,7 @@ function CTA() {
             <WtfMark size={56} />
           </div>
           <h2 className="text-3xl md:text-5xl font-semibold tracking-tight leading-tight">
-            Перестань копировать ошибки в Google.<br />
+            Перестань копировать вывод в Google.<br />
             <span className="bg-gradient-to-r from-amber-400 to-yellow-300 bg-clip-text text-transparent">
               Просто пиши wtf.
             </span>
