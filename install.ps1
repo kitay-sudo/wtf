@@ -28,6 +28,18 @@ $version = if ($env:WTF_VERSION) { $env:WTF_VERSION } else {
     try {
         (Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest").tag_name
     } catch {
+        # 404 = у репо нет релизов.
+        if ($_.Exception.Response.StatusCode.value__ -eq 404) {
+            Write-Host ""
+            Write-Host "  ✗ У репозитория $Repo ещё нет ни одного релиза." -ForegroundColor Red
+            Write-Host ""
+            Write-Host "  Маинтейнеру: выпусти первый релиз —"
+            Write-Host "    scripts\release.bat v0.1.0"
+            Write-Host ""
+            Write-Host "  После того как workflow release.yml завершится, эта команда заработает."
+            Write-Host ""
+            exit 1
+        }
         Err "не удалось получить latest version с GitHub: $_"
     }
 }

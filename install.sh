@@ -77,7 +77,26 @@ detect_arch() {
 }
 
 latest_version() {
-  curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" \
+  local response
+  response=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest")
+
+  # No releases yet → API returns {"message":"Not Found"} with status 404.
+  # Detect this and explain instead of failing silently.
+  if echo "$response" | grep -q '"message": *"Not Found"'; then
+    err "У репозитория ${REPO} ещё нет ни одного релиза."
+    err ""
+    err "Маинтейнеру: выпусти первый релиз —"
+    err "  scripts\\release.bat v0.1.0   (Windows)"
+    err "  ./scripts/release.sh v0.1.0   (Linux/macOS)"
+    err ""
+    err "После того как workflow release.yml завершится, эта команда заработает."
+    err ""
+    err "Альтернатива — собрать из исходников:"
+    err "  git clone https://github.com/${REPO} && cd wtf && go build -o wtf ./cmd/wtf"
+    exit 1
+  fi
+
+  echo "$response" \
     | grep -E '"tag_name"' \
     | head -1 \
     | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/'
