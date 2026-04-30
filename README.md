@@ -214,6 +214,8 @@ wtf version                версия
 
 ## Вклад
 
+Если проект помог — поставь ⭐ на [github.com/kitay-sudo/wtf](https://github.com/kitay-sudo/wtf). Это бесплатно для тебя и реально помогает: чем больше звёзд, тем проще другим находить инструмент.
+
 PR welcome. Запустить локально:
 
 ```bash
@@ -230,6 +232,15 @@ cd frontend
 npm install
 npm run dev   # http://localhost:5173
 ```
+
+### Поддержать криптой
+
+Если хочется не только звёздочку, но и материально — буду рад. После доната напиши в Telegram [@kitay9](https://t.me/kitay9) свой ник, добавлю в стену чести на лендинге.
+
+| Сеть | Адрес |
+|---|---|
+| **USDT** · TRON (TRC20) | `TF9F2FPkreHVfbe8tZtn4V76j3jLo4SeXM` |
+| **TON** · The Open Network | `UQBl88kXWJWyHkDPkWNYQwwSCiCAIfA2DiExtZElwJFlIc1o` |
 
 ### Выпуск нового релиза
 
