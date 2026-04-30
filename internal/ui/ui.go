@@ -215,16 +215,27 @@ func Prompt(reader *bufio.Reader, label, def string) string {
 }
 
 // Choice — выбор одного из вариантов.
+// Choice — нумерованный выбор. Юзер вводит число (или имя варианта)
+// или жмёт Enter чтобы оставить значение по умолчанию. Дефолт помечается
+// "(по умолчанию)" в строке варианта — никаких стрелочек/курсоров,
+// потому что мы не реализуем raw-mode перехват клавиш и стрелки нажимать
+// бесполезно.
 func Choice(reader *bufio.Reader, label string, options []string, def string) string {
 	fmt.Fprintf(os.Stderr, "%s %s\n", colorize(yellow, "?"), label)
+	defaultIdx := -1
 	for i, o := range options {
-		marker := " "
+		suffix := ""
 		if o == def {
-			marker = colorize(yellowBold, "›")
+			defaultIdx = i + 1
+			suffix = colorize(gray, "  (по умолчанию)")
 		}
-		fmt.Fprintf(os.Stderr, "  %s %d) %s\n", marker, i+1, o)
+		fmt.Fprintf(os.Stderr, "    %d) %s%s\n", i+1, o, suffix)
 	}
-	fmt.Fprintf(os.Stderr, "  %s ", colorize(gray, "выбор:"))
+	hint := "номер или Enter"
+	if defaultIdx > 0 {
+		hint = fmt.Sprintf("номер 1-%d или Enter", len(options))
+	}
+	fmt.Fprintf(os.Stderr, "  %s ", colorize(gray, hint+":"))
 	line, _ := reader.ReadString('\n')
 	v := strings.TrimSpace(line)
 	if v == "" {
