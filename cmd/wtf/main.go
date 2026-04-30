@@ -390,30 +390,31 @@ func runWizard(cfg *config.Config) {
 	cfg.Language = ui.Choice(r, "Язык ответа",
 		[]string{"ru", "en"}, cfg.Language)
 
-	for _, p := range []config.Provider{config.ProviderClaude, config.ProviderOpenAI, config.ProviderGemini} {
-		ui.Section(string(p))
+	// Сначала настраиваем выбранного провайдера. Других не трогаем —
+	// после первой настройки спрашиваем, нужно ли добавить ещё.
+	configureProvider(r, cfg, cfg.DefaultProvider)
 
-		curKey := cfg.APIKey(p)
-		mask := "не задан, Enter — пропустить"
-		if curKey != "" {
-			mask = mask4(curKey) + ", Enter — оставить"
+	allProviders := []config.Provider{config.ProviderClaude, config.ProviderOpenAI, config.ProviderGemini}
+	for {
+		// Какие ещё провайдеры можно добавить — те, у которых ключ не задан.
+		var remaining []string
+		for _, p := range allProviders {
+			if p == cfg.DefaultProvider {
+				continue
+			}
+			if cfg.APIKey(p) == "" {
+				remaining = append(remaining, string(p))
+			}
 		}
-		newKey := ui.Prompt(r, fmt.Sprintf("API key для %s", p), mask)
-		if newKey != "" && newKey != mask {
-			pc := cfg.Providers[p]
-			pc.APIKey = newKey
-			cfg.Providers[p] = pc
-			ui.OK("ключ сохранён локально (~/.wtf/config.json, mode 0600)")
+		if len(remaining) == 0 {
+			break
 		}
-
-		curModel := cfg.Model(p)
-		known := config.KnownModels[p]
-		newModel := ui.ChoiceOrCustom(r, fmt.Sprintf("Модель для %s", p), known, curModel)
-		if newModel != "" && newModel != curModel {
-			pc := cfg.Providers[p]
-			pc.Model = newModel
-			cfg.Providers[p] = pc
+		add := ui.Choice(r, "Добавить ещё одного провайдера? (можно переключаться через --provider)",
+			append([]string{"нет"}, remaining...), "нет")
+		if add == "нет" || add == "" {
+			break
 		}
+		configureProvider(r, cfg, config.Provider(add))
 	}
 
 	if err := cfg.Save(); err != nil {
@@ -427,6 +428,32 @@ func runWizard(cfg *config.Config) {
 		ui.Info("следующий шаг: wtf init  (установить shell-хук)")
 	} else {
 		ui.Warn("ни одного ключа не задано — wtf не сможет работать")
+	}
+}
+
+func configureProvider(r *bufio.Reader, cfg *config.Config, p config.Provider) {
+	ui.Section(string(p))
+
+	curKey := cfg.APIKey(p)
+	mask := "не задан, Enter — пропустить"
+	if curKey != "" {
+		mask = mask4(curKey) + ", Enter — оставить"
+	}
+	newKey := ui.Prompt(r, fmt.Sprintf("API key для %s", p), mask)
+	if newKey != "" && newKey != mask {
+		pc := cfg.Providers[p]
+		pc.APIKey = newKey
+		cfg.Providers[p] = pc
+		ui.OK("ключ сохранён локально (~/.wtf/config.json, mode 0600)")
+	}
+
+	curModel := cfg.Model(p)
+	known := config.KnownModels[p]
+	newModel := ui.ChoiceOrCustom(r, fmt.Sprintf("Модель для %s", p), known, curModel)
+	if newModel != "" && newModel != curModel {
+		pc := cfg.Providers[p]
+		pc.Model = newModel
+		cfg.Providers[p] = pc
 	}
 }
 
