@@ -1,6 +1,6 @@
-# build
-wtf
-wtf.exe
+# build artefacts (только в корне — не блокируем cmd/wtf/)
+/wtf
+/wtf.exe
 dist/
 build/
 

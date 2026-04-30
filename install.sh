@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wtf 🤬 — one-command installer / updater / uninstaller.
+# wtf — one-command installer / updater / uninstaller.
 #
 # Usage:
 #   # Первая установка ИЛИ обновление (одна команда):
@@ -55,7 +55,7 @@ die()  { err "$*"; exit 1; }
 
 header() {
   local version="$1" os="$2" arch="$3"
-  printf "\n  %s🤬  wtf installer%s · %s%s%s · %s%s/%s%s\n\n" \
+  printf "\n  %s[!?]  wtf installer%s · %s%s%s · %s%s/%s%s\n\n" \
     "$C_BOLD" "$C_RESET" "$C_OK" "$version" "$C_RESET" "$C_CYAN" "$os" "$arch" "$C_RESET"
 }
 
@@ -120,7 +120,7 @@ do_install() {
   ok "установлено: $(${INSTALL_DIR}/${BIN_NAME} version)"
 
   printf "\n"
-  printf "  %s🤬 готово!%s\n\n" "$C_BOLD" "$C_RESET"
+  printf "  %s[!?] готово!%s\n\n" "$C_BOLD" "$C_RESET"
   printf "  Дальше:\n"
   printf "    %s$%s wtf config       %s# настроить провайдера и ключ%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
   printf "    %s$%s wtf init         %s# поставить shell-хук%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"

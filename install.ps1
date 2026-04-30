@@ -1,4 +1,4 @@
-# wtf 🤬 — Windows installer (PowerShell).
+# wtf — Windows installer (PowerShell).
 #
 # Usage:
 #   iwr -useb https://raw.githubusercontent.com/kitay-sudo/wtf/main/install.ps1 | iex
@@ -33,7 +33,7 @@ $version = if ($env:WTF_VERSION) { $env:WTF_VERSION } else {
 }
 
 Write-Host ""
-Write-Host "  🤬 wtf installer" -NoNewline -ForegroundColor White
+Write-Host "  [!?] wtf installer" -NoNewline -ForegroundColor White
 Write-Host " · " -NoNewline
 Write-Host $version -NoNewline -ForegroundColor Yellow
 Write-Host " · windows/$arch"
@@ -80,7 +80,7 @@ if ($userPath -notlike "*$InstallDir*") {
 Remove-Item -Recurse -Force $tmp
 
 Write-Host ""
-Write-Host "  🤬 готово!" -ForegroundColor White
+Write-Host "  [!?] готово!" -ForegroundColor White
 Write-Host ""
 Write-Host "  Дальше:"
 Write-Host "    PS> wtf config       " -NoNewline; Write-Host "# настроить провайдера и ключ" -ForegroundColor DarkGray

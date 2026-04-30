@@ -15,6 +15,8 @@ import {
   Sparkles,
   Layers,
   KeyRound,
+  Heart,
+  Send,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import GridBackground from '../components/landing/GridBackground';
@@ -22,7 +24,7 @@ import Reveal from '../components/landing/Reveal';
 import TerminalDemo from '../components/landing/TerminalDemo';
 import FeatureCard from '../components/landing/FeatureCard';
 import FAQItem from '../components/landing/FAQItem';
-import RageMark from '../components/landing/RageMark';
+import WtfMark from '../components/landing/WtfMark';
 import SectionDivider from '../components/landing/SectionDivider';
 
 const REPO_URL = 'https://github.com/kitay-sudo/wtf';
@@ -42,6 +44,7 @@ export default function Landing() {
       <HowItWorks />
       <DemoSection />
       <FAQ />
+      <Support />
       <CTA />
       <Changelog />
       <Footer />
@@ -88,9 +91,7 @@ function Nav() {
     <header className="sticky top-0 z-50 border-b border-zinc-900/80 bg-zinc-950/70 backdrop-blur-lg">
       <div className="max-w-6xl mx-auto px-5 h-14 flex items-center justify-between">
         <a href="#top" className="flex items-center gap-2.5 font-semibold">
-          <span className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-amber-400/30 bg-amber-400/10">
-            <RageMark size={22} />
-          </span>
+          <WtfMark size={28} />
           <span className="tracking-tight">wtf</span>
         </a>
 
@@ -101,6 +102,10 @@ function Nav() {
           <a href="#install" className="hover:text-zinc-100 transition-colors">Установка</a>
           <a href="#faq" className="hover:text-zinc-100 transition-colors">FAQ</a>
           <a href="#changelog" className="hover:text-zinc-100 transition-colors">Изменения</a>
+          <a href="#support" className="text-amber-300/90 hover:text-amber-200 transition-colors inline-flex items-center gap-1.5">
+            <Heart size={12} fill="currentColor" />
+            Стена чести
+          </a>
         </nav>
 
         <a
@@ -137,8 +142,11 @@ function Hero() {
         <Reveal delay={0.05}>
           <h1 className="mt-6 text-center text-4xl md:text-6xl font-semibold tracking-tight leading-[1.05]">
             Упал в терминале — пиши <br />
-            <span className="bg-gradient-to-r from-amber-400 to-yellow-300 bg-clip-text text-transparent">
-              wtf 🤬
+            <span className="inline-flex items-center gap-3 align-middle">
+              <span className="bg-gradient-to-r from-amber-400 to-yellow-300 bg-clip-text text-transparent">
+                wtf
+              </span>
+              <WtfMark size={56} />
             </span>
           </h1>
         </Reveal>
@@ -678,8 +686,8 @@ function CTA() {
       </div>
       <div className="relative max-w-3xl mx-auto px-5 text-center">
         <Reveal>
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl border border-amber-400/30 bg-amber-400/10 text-2xl mb-6">
-            🤬
+          <div className="inline-flex items-center justify-center mb-6">
+            <WtfMark size={56} />
           </div>
           <h2 className="text-3xl md:text-5xl font-semibold tracking-tight leading-tight">
             Перестань копировать ошибки в Google.<br />
@@ -837,12 +845,342 @@ function Changelog() {
   );
 }
 
+// Стена донатеров. Чтобы добавить нового — допиши объект в массив и сделай commit.
+// Поля:
+//   handle    — ник (с @ или без, при отрисовке @ всё равно срезается)
+//   amount    — строка для отображения, например "0.66 TON" или "10 USDT"
+//   amountTon — число в TON для сортировки (используется ТОЛЬКО для определения top)
+//   addedAt   — дата в ISO ("2026-04-30"), нужна для роли first-ever (первая десятка)
+//   note      — опционально, короткая ремарка
+//
+// Роли расставляются автоматически:
+//   • TOP DONOR  — у кого amountTon максимален (золотой акцент)
+//   • FIRST EVER — первые 10 по addedAt (серебряный шильдик, не отбирается)
+const DONORS = [];
+
+const TELEGRAM_HANDLE = '@kitay9';
+const TELEGRAM_URL = 'https://t.me/kitay9';
+
+function Support() {
+  const wallets = [
+    {
+      label: 'USDT',
+      network: 'TRON · TRC20',
+      address: 'TF9F2FPkreHVfbe8tZtn4V76j3jLo4SeXM',
+    },
+    {
+      label: 'TON',
+      network: 'The Open Network',
+      address: 'UQBl88kXWJWyHkDPkWNYQwwSCiCAIfA2DiExtZElwJFlIc1o',
+    },
+  ];
+
+  return (
+    <section id="support" className="relative py-24 md:py-32 border-t border-zinc-900/80 overflow-hidden">
+      <div className="relative max-w-3xl mx-auto px-5">
+        <Reveal>
+          <div className="text-center">
+            <SectionDivider symbol="<3" label="Gratitude" />
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              Поддержать проект
+            </h2>
+            <p className="mt-4 text-zinc-400 leading-relaxed max-w-xl mx-auto">
+              wtf пилится в свободное время, без подписок и платных тарифов. Если он сэкономил
+              тебе пару часов — поддержать можно криптой. Любая сумма идёт на новые провайдеры,
+              ускорение релизов и время на доведение фич из roadmap.
+            </p>
+            <p className="mt-3 text-zinc-500 text-sm leading-relaxed max-w-xl mx-auto">
+              Поддержавшие попадают в{' '}
+              <a href="#support" className="text-amber-300/90 hover:text-amber-200 underline-offset-4 hover:underline">
+                стену чести
+              </a>{' '}
+              ниже — публичный список тех, кто помог проекту встать на ноги.
+            </p>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.1}>
+          <div className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {wallets.map((w, i) => (
+              <WalletCard key={w.label} {...w} delay={i * 0.05} />
+            ))}
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.15}>
+          <div className="mt-10 rounded-2xl border border-amber-400/20 bg-gradient-to-br from-amber-400/5 via-zinc-900/40 to-zinc-900/40 p-6 md:p-8">
+            <div className="flex items-start gap-4">
+              <div className="shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-xl border border-amber-400/30 bg-amber-400/10 text-amber-400">
+                <Send size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base md:text-lg font-semibold text-zinc-100">
+                  Хочешь попасть в стену чести?
+                </h3>
+                <p className="mt-1.5 text-sm text-zinc-400 leading-relaxed">
+                  После доната напиши в Telegram{' '}
+                  <a
+                    href={TELEGRAM_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-amber-400 hover:text-amber-300 font-mono"
+                  >
+                    {TELEGRAM_HANDLE}
+                  </a>{' '}
+                  свой ник — добавлю в список ниже навсегда.
+                </p>
+                <a
+                  href={TELEGRAM_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border border-amber-400/30 hover:border-amber-400/60 hover:bg-amber-400/10 transition-colors text-amber-300"
+                >
+                  <Send size={13} />
+                  Написать в Telegram
+                </a>
+              </div>
+            </div>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.2}>
+          <DonorsWall donors={DONORS} />
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function DonorsWall({ donors }) {
+  const empty = !donors || donors.length === 0;
+
+  // Особые роли: top (по сумме) и first-ever (по дате).
+  // Один и тот же донатер может держать обе роли — тогда показываем одну
+  // карточку с двумя плашками. Когда придёт следующий с большей суммой —
+  // он станет top, а старый top-first останется только first-ever.
+  const annotated = !empty ? annotateDonors(donors) : [];
+  const honors = annotated.filter((d) => d.roles.length > 0);
+  const rest = annotated.filter((d) => d.roles.length === 0);
+
+  return (
+    <div className="mt-10">
+      <div className="flex items-center gap-3 mb-2">
+        <Heart size={14} className="text-amber-400" strokeWidth={2.4} />
+        <h3 className="text-sm font-semibold tracking-wide uppercase text-zinc-300">
+          Стена чести
+        </h3>
+        {!empty && (
+          <span className="text-xs text-zinc-500 font-mono ml-auto">
+            {donors.length} {donors.length === 1 ? 'человек' : 'человек'}
+          </span>
+        )}
+      </div>
+      {!empty && (
+        <p className="mb-5 text-xs text-zinc-500 leading-relaxed">
+          <span className="text-amber-300/90 font-mono">top</span> — крупнейший донат на сейчас.{' '}
+          <span className="text-zinc-300 font-mono">first ever</span> — первая десятка тех, кто
+          поддержал проект раньше всех. Этот шильдик не отбирается и достаётся только им —
+          навсегда.
+        </p>
+      )}
+
+      {empty ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/30 p-8 text-center">
+          <p className="text-sm text-zinc-500">
+            Пока пусто.{' '}
+            <a
+              href={TELEGRAM_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-amber-400 hover:text-amber-300 font-medium"
+            >
+              Будь первым
+            </a>{' '}
+            — твой ник окажется здесь и останется навсегда.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {honors.length > 0 && (
+            <div
+              className={
+                honors.length === 1
+                  ? 'grid grid-cols-1 gap-4'
+                  : 'grid grid-cols-1 md:grid-cols-2 gap-4'
+              }
+            >
+              {honors.map((d) => (
+                <HonorCard key={d.handle} donor={d} />
+              ))}
+            </div>
+          )}
+
+          {rest.length > 0 && (
+            <ul className="flex flex-wrap gap-2">
+              {rest.map((d) => {
+                const nick = d.handle.replace(/^@/, '');
+                return (
+                  <li
+                    key={nick}
+                    title={d.note || nick}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-800 bg-zinc-900/50 text-sm text-zinc-300 font-mono"
+                  >
+                    <Heart size={11} className="text-amber-400/70" fill="currentColor" />
+                    {nick}
+                    {d.amount && (
+                      <span className="text-zinc-500 text-[11px]">· {d.amount}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const FIRST_EVER_LIMIT = 10;
+
+function annotateDonors(donors) {
+  let topIdx = -1;
+  let topAmount = -Infinity;
+  donors.forEach((d, i) => {
+    const a = typeof d.amountTon === 'number' ? d.amountTon : -Infinity;
+    if (a > topAmount) {
+      topAmount = a;
+      topIdx = i;
+    }
+  });
+
+  const firstIdxs = new Set(
+    donors
+      .map((d, i) => ({ i, t: d.addedAt ? new Date(d.addedAt).getTime() : NaN }))
+      .filter((x) => !Number.isNaN(x.t))
+      .sort((a, b) => a.t - b.t)
+      .slice(0, FIRST_EVER_LIMIT)
+      .map((x) => x.i),
+  );
+
+  return donors.map((d, i) => {
+    const roles = [];
+    if (i === topIdx && topAmount > -Infinity) roles.push('top');
+    if (firstIdxs.has(i)) roles.push('first-ever');
+    return { ...d, roles };
+  });
+}
+
+function HonorCard({ donor }) {
+  const nick = donor.handle.replace(/^@/, '');
+  const isTop = donor.roles.includes('top');
+  const isFirst = donor.roles.includes('first-ever');
+
+  // Top → золотая, иначе (только first-ever) → серебряная.
+  const gold = isTop;
+  const palette = gold
+    ? {
+        border: 'border-amber-400/40',
+        bg: 'from-amber-400/10 via-zinc-900/60 to-zinc-900/40',
+        iconWrap: 'border-amber-400/50 bg-amber-400/10 text-amber-300',
+      }
+    : {
+        border: 'border-zinc-400/25',
+        bg: 'from-zinc-300/5 via-zinc-900/60 to-zinc-900/40',
+        iconWrap: 'border-zinc-400/40 bg-zinc-300/10 text-zinc-200',
+      };
+
+  return (
+    <div
+      title={donor.note || nick}
+      className={`relative block overflow-hidden rounded-2xl border bg-gradient-to-br p-5 md:p-6 ${palette.border} ${palette.bg}`}
+    >
+      <div className="relative flex items-start gap-4">
+        <div
+          className={`shrink-0 inline-flex items-center justify-center w-12 h-12 rounded-xl border ${palette.iconWrap}`}
+        >
+          <Heart size={20} fill="currentColor" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {isTop && (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-amber-400/40 bg-amber-400/10 text-amber-300 text-[10px] uppercase tracking-widest font-semibold font-mono">
+                ★ top
+              </span>
+            )}
+            {isFirst && (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-zinc-400/40 bg-zinc-300/10 text-zinc-200 text-[10px] uppercase tracking-widest font-semibold font-mono">
+                01 first ever
+              </span>
+            )}
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-xl md:text-2xl font-semibold font-mono text-zinc-100">
+              {nick}
+            </span>
+            {donor.amount && (
+              <span className="text-sm font-mono text-amber-300">{donor.amount}</span>
+            )}
+          </div>
+
+          {(donor.note || (isTop && isFirst)) && (
+            <p className="mt-1.5 text-xs text-zinc-500 leading-relaxed">
+              {isTop && isFirst
+                ? donor.note || 'и первый по времени, и пока крупнейший донат'
+                : isTop
+                  ? donor.note || 'крупнейший донат на момент сейчас'
+                  : donor.note || 'один из первой десятки поддержавших'}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WalletCard({ label, network, address }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* empty */
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 backdrop-blur">
+      <div className="flex items-baseline justify-between mb-3">
+        <span className="text-base font-semibold text-zinc-100">{label}</span>
+        <span className="text-xs text-zinc-500 font-mono">{network}</span>
+      </div>
+      <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+        <code className="text-xs text-amber-300 font-mono break-all flex-1 min-w-0">
+          {address}
+        </code>
+        <button
+          onClick={onCopy}
+          className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-md border border-zinc-700 hover:border-amber-400/50 hover:bg-amber-400/10 transition-colors text-zinc-300"
+          aria-label={`Скопировать адрес ${label}`}
+        >
+          {copied ? <Check size={14} className="text-amber-400" /> : <Copy size={14} />}
+          {copied ? 'Скопировано' : 'Копировать'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Footer() {
   return (
     <footer className="border-t border-zinc-900/80 py-10">
       <div className="max-w-6xl mx-auto px-5 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2 text-sm text-zinc-500">
-          <span>wtf 🤬 · MIT · © {new Date().getFullYear()}</span>
+          <WtfMark size={18} />
+          <span>wtf · MIT · © {new Date().getFullYear()}</span>
           <span className="text-zinc-700">·</span>
           <a
             href="https://github.com/kitay-sudo"
@@ -858,6 +1196,7 @@ function Footer() {
           <a href="#install" className="hover:text-zinc-300 transition-colors">Установка</a>
           <a href="#faq" className="hover:text-zinc-300 transition-colors">FAQ</a>
           <a href="#changelog" className="hover:text-zinc-300 transition-colors">Изменения</a>
+          <a href="#support" className="hover:text-zinc-300 transition-colors">Поддержать</a>
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors flex items-center gap-1.5">
             <Github size={14} /> GitHub
           </a>

@@ -48,7 +48,7 @@ func colorize(c, s string) string {
 func Banner(title, subtitle string) {
 	out := os.Stderr
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, colorize(yellowBold, "  🤬  "+title))
+	fmt.Fprintln(out, colorize(yellowBold, "  [!?]  "+title))
 	if subtitle != "" {
 		fmt.Fprintln(out, colorize(gray, "      "+subtitle))
 	}
