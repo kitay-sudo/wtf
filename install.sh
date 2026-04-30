@@ -110,8 +110,18 @@ do_uninstall() {
   info "конфиг и кеш в ~/.wtf/ оставлены — удали вручную если нужно: rm -rf ~/.wtf"
 }
 
+TMP_DIR=""
+cleanup() {
+  # `set -u` + EXIT trap = переменная должна быть инициализирована, иначе
+  # скрипт падает после успешной установки с "tmp: unbound variable".
+  if [[ -n "${TMP_DIR:-}" && -d "${TMP_DIR}" ]]; then
+    rm -rf "${TMP_DIR}"
+  fi
+}
+trap cleanup EXIT
+
 do_install() {
-  local os arch version url tmp
+  local os arch version url
   os=$(detect_os)
   arch=$(detect_arch)
   version="${WTF_VERSION:-$(latest_version)}"
@@ -120,22 +130,21 @@ do_install() {
   header "$version" "$os" "$arch"
 
   url="https://github.com/${REPO}/releases/download/${version}/wtf_${os}_${arch}.tar.gz"
-  tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' EXIT
+  TMP_DIR=$(mktemp -d)
 
   step "скачиваю $url"
-  if ! curl -sSL -o "$tmp/wtf.tar.gz" "$url"; then
+  if ! curl -sSL -o "$TMP_DIR/wtf.tar.gz" "$url"; then
     die "не удалось скачать релиз — проверь, что версия $version существует"
   fi
   ok "скачано"
 
   step "распаковываю"
-  tar -xzf "$tmp/wtf.tar.gz" -C "$tmp"
-  [[ -f "$tmp/wtf" ]] || die "в архиве нет бинарника wtf"
+  tar -xzf "$TMP_DIR/wtf.tar.gz" -C "$TMP_DIR"
+  [[ -f "$TMP_DIR/wtf" ]] || die "в архиве нет бинарника wtf"
   ok "распаковано"
 
   step "устанавливаю в ${INSTALL_DIR}/${BIN_NAME}"
-  install -m 0755 "$tmp/wtf" "${INSTALL_DIR}/${BIN_NAME}"
+  install -m 0755 "$TMP_DIR/wtf" "${INSTALL_DIR}/${BIN_NAME}"
   ok "установлено: $(${INSTALL_DIR}/${BIN_NAME} version)"
 
   printf "\n"
