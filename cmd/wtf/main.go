@@ -19,7 +19,10 @@ import (
 	"github.com/bitcoff/wtf/internal/ui"
 )
 
-const version = "0.1.0"
+// version is overridden at build time via:
+//   go build -ldflags "-X main.version=v0.1.0"
+// release.yml passes the git tag here.
+var version = "dev"
 
 func main() {
 	if len(os.Args) > 1 {

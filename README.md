@@ -231,6 +231,37 @@ npm install
 npm run dev   # http://localhost:5173
 ```
 
+### Выпуск нового релиза
+
+Релиз — это git-тег `vX.Y.Z`, всё остальное автоматизировано:
+
+```bash
+# Windows
+scripts\release.bat patch    # bug-fix:    v0.1.0 → v0.1.1
+scripts\release.bat minor    # фича:        v0.1.0 → v0.2.0
+scripts\release.bat major    # breaking:    v0.1.0 → v1.0.0
+scripts\release.bat v0.5.0   # явная версия
+
+# macOS / Linux / Git Bash
+./scripts/release.sh patch
+```
+
+Скрипт:
+
+1. Проверяет что ты на `main`, working tree чистый и синхронизирован с `origin`.
+2. Считает следующую версию по последнему тегу (или берёт явную).
+3. Показывает список коммитов с прошлого релиза и просит подтверждения.
+4. Создаёт annotated-тег и пушит его в `origin`.
+
+После пуша тега запускается [`.github/workflows/release.yml`](.github/workflows/release.yml):
+
+- matrix-сборка под 6 платформ (`linux/darwin/windows × amd64/arm64`) с прокинутой версией через `-ldflags "-X main.version=$TAG"`
+- архивы `wtf_<os>_<arch>.tar.gz` (или `.zip` для Windows) с README + LICENSE внутри
+- `SHA256SUMS.txt` для верификации
+- GitHub Release с авто-сгенерированными notes (по коммитам с прошлого тега)
+
+Через 2-3 минуты бинари висят на странице Releases, а `install.sh` / `install.ps1` начинают видеть новую версию через GitHub API.
+
 ## Лицензия
 
 MIT © [kitay-sudo](https://github.com/kitay-sudo)

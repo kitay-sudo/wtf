@@ -121,6 +121,7 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist/wtf_*
+            dist/SHA256SUMS.txt
           body: |
             ## Установка
 
