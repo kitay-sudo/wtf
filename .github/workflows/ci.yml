@@ -1,0 +1,44 @@
+# CI — компилирует Go-бинарь и собирает frontend на каждый push в main / PR.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  go:
+    name: build go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: vet
+        run: go vet ./...
+      - name: build
+        run: go build -o /tmp/wtf ./cmd/wtf
+      - name: smoke
+        run: |
+          /tmp/wtf version
+          /tmp/wtf help
+
+  frontend:
+    name: build frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build

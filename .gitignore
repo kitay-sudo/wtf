@@ -1,0 +1,36 @@
+# build
+wtf
+wtf.exe
+dist/
+build/
+
+# go
+*.test
+*.out
+vendor/
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# secrets / local
+.env
+.env.local
+*.local
+
+# claude
+.claude/
+
+# misc
+*.log
+sdf

@@ -1,0 +1,139 @@
+# Release — собирает релизные бинари и публикует GitHub Release.
+#
+# Триггер: push тега вида vX.Y.Z (например v0.1.0).
+#
+# Делает:
+#   1. matrix-сборка для linux/darwin/windows × amd64/arm64
+#   2. артефакты:
+#        wtf_linux_amd64.tar.gz / wtf_linux_arm64.tar.gz
+#        wtf_darwin_amd64.tar.gz / wtf_darwin_arm64.tar.gz
+#        wtf_windows_amd64.zip   / wtf_windows_arm64.zip
+#   3. version-stamp через -ldflags "-X main.version=$TAG", -s -w для размера
+#   4. SHA256SUMS.txt — для верификации скачанного бинаря
+#
+# install.sh / install.ps1 ждут ровно эти имена файлов в Release —
+# не менять без обновления установщиков.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: tar.gz
+          - goos: linux
+            goarch: arm64
+            ext: tar.gz
+          - goos: darwin
+            goarch: amd64
+            ext: tar.gz
+          - goos: darwin
+            goarch: arm64
+            ext: tar.gz
+          - goos: windows
+            goarch: amd64
+            ext: zip
+          - goos: windows
+            goarch: arm64
+            ext: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          BIN_NAME="wtf"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BIN_NAME="wtf.exe"
+          fi
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o "$BIN_NAME" \
+            ./cmd/wtf
+
+          ARCHIVE="wtf_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            zip "${ARCHIVE}.zip" "$BIN_NAME" README.md LICENSE
+          else
+            tar -czf "${ARCHIVE}.tar.gz" "$BIN_NAME" README.md LICENSE
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wtf_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: wtf_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum wtf_* > SHA256SUMS.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/wtf_*
+          body: |
+            ## Установка
+
+            **macOS / Linux:**
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash
+            ```
+
+            **Windows (PowerShell):**
+            ```powershell
+            iwr -useb https://raw.githubusercontent.com/${{ github.repository }}/main/install.ps1 | iex
+            ```
+
+            Или вручную: скачай архив под свою платформу, проверь хэш через `SHA256SUMS.txt`, распакуй и положи `wtf` в PATH. Затем запусти `wtf config`.
+
+            ---
