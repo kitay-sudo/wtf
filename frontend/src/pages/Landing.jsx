@@ -17,6 +17,8 @@ import {
   KeyRound,
   Heart,
   Send,
+  Server,
+  ArrowRight,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import GridBackground from '../components/landing/GridBackground';
@@ -25,6 +27,7 @@ import TerminalDemo from '../components/landing/TerminalDemo';
 import FeatureCard from '../components/landing/FeatureCard';
 import FAQItem from '../components/landing/FAQItem';
 import WtfMark from '../components/landing/WtfMark';
+import AnnouncementBar from '../components/landing/AnnouncementBar';
 import SectionDivider from '../components/landing/SectionDivider';
 
 const REPO_URL = 'https://github.com/kitay-sudo/wtf';
@@ -35,6 +38,7 @@ const INSTALL_CMD_PWSH = 'iwr -useb https://raw.githubusercontent.com/kitay-sudo
 export default function Landing() {
   return (
     <div className="min-h-dvh bg-zinc-950 text-zinc-100 antialiased">
+      <AnnouncementBar />
       <Nav />
       <Hero />
       <WhyName />
@@ -784,9 +788,10 @@ function Support() {
               Поддержать проект
             </h2>
             <p className="mt-4 text-zinc-400 leading-relaxed max-w-xl mx-auto">
-              wtf пилится в свободное время, без подписок и платных тарифов. Если он сэкономил
-              тебе пару часов — поддержать можно криптой. Любая сумма идёт на новые провайдеры,
-              ускорение релизов и время на доведение фич из roadmap.
+              wtf пилится в свободное время, без подписок и платных тарифов. Если он
+              сэкономил тебе пару часов — поддержать можно тремя способами ниже.
+              Деньги идут на новые провайдеры, ускорение релизов и время на доведение
+              фич из roadmap.
             </p>
             <p className="mt-3 text-zinc-500 text-sm leading-relaxed max-w-xl mx-auto">
               Поддержавшие попадают в{' '}
@@ -798,8 +803,20 @@ function Support() {
           </div>
         </Reveal>
 
-        <Reveal delay={0.1}>
-          <div className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Reveal delay={0.08}>
+          <TimewebCard />
+        </Reveal>
+
+        <Reveal delay={0.12}>
+          <div className="mt-6 text-center">
+            <p className="text-xs uppercase tracking-widest text-zinc-500 font-mono">
+              или криптой напрямую
+            </p>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.15}>
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             {wallets.map((w, i) => (
               <WalletCard key={w.label} {...w} delay={i * 0.05} />
             ))}
@@ -1032,6 +1049,68 @@ function HonorCard({ donor }) {
                   : donor.note || 'один из первой десятки поддержавших'}
             </p>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// TimewebCard — отдельный способ поддержать проект, который НИЧЕГО не стоит юзеру:
+// он регистрируется по нашей реф-ссылке (получает свой сервер),
+// мы получаем небольшую партнёрскую комиссию.
+//
+// Disclosure прямо в карточке: "партнёрская ссылка". Никаких маскировок —
+// эта секция и так помечена как способ поддержки, юзер понимает контекст.
+function TimewebCard() {
+  return (
+    <div className="mt-10 rounded-2xl border border-amber-400/30 bg-gradient-to-br from-amber-400/10 via-zinc-900/60 to-zinc-900/40 p-6 md:p-7">
+      <div className="flex items-start gap-4">
+        <div className="shrink-0 inline-flex items-center justify-center w-12 h-12 rounded-xl border border-amber-400/40 bg-amber-400/10 text-amber-300">
+          <Server size={20} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+            <h3 className="text-base md:text-lg font-semibold text-zinc-100">
+              Поднять сервер на Timeweb Cloud
+            </h3>
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-zinc-700 bg-zinc-900/60 text-[10px] uppercase tracking-widest font-mono text-zinc-400">
+              партнёрская ссылка
+            </span>
+          </div>
+          <p className="text-sm text-zinc-400 leading-relaxed">
+            Самый честный способ поддержать проект — без расходов из своего кармана.
+            Регистрируешься на{' '}
+            <a
+              href="https://timeweb.cloud/?i=104289"
+              target="_blank"
+              rel="sponsored noopener"
+              className="text-amber-300 hover:text-amber-200 font-medium underline-offset-4 hover:underline"
+            >
+              Timeweb Cloud
+            </a>{' '}
+            по нашей ссылке, получаешь VPS под свои задачи — и нам тоже капает
+            небольшая комиссия. В качестве бонуса —{' '}
+            <span className="text-zinc-200">помощь с настройкой сервера</span>:
+            напиши в Telegram{' '}
+            <a
+              href="https://t.me/kitay9"
+              target="_blank"
+              rel="noreferrer"
+              className="text-amber-300 hover:text-amber-200 font-mono"
+            >
+              @kitay9
+            </a>{' '}
+            — подскажу с конфигом, файрволом, деплоем своих сервисов.
+          </p>
+          <a
+            href="https://timeweb.cloud/?i=104289"
+            target="_blank"
+            rel="sponsored noopener"
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-zinc-950 transition-colors"
+          >
+            Перейти к Timeweb Cloud
+            <ArrowRight size={14} />
+          </a>
         </div>
       </div>
     </div>
