@@ -138,7 +138,7 @@ func Run(
 			}
 		}
 
-		io.Thinking(fmt.Sprintf("думаю (%s)...", cli.Name()))
+		io.Thinking(fmt.Sprintf("Думаю (%s)...", cli.Name()))
 		resp, err := cli.Chat(ctx, provider.ChatRequest{
 			System:      system,
 			Messages:    trimHistory(messages, KeepFullRounds),
