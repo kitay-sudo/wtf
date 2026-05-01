@@ -32,7 +32,6 @@ import (
 	wctx "github.com/bitcoff/wtf/internal/context"
 	"github.com/bitcoff/wtf/internal/memory"
 	"github.com/bitcoff/wtf/internal/provider"
-	"github.com/bitcoff/wtf/internal/render"
 	"github.com/bitcoff/wtf/internal/ui"
 )
 
@@ -325,7 +324,7 @@ func (c *consoleIO) Refused(command, reason string) {
 }
 
 func (c *consoleIO) Final(summary string) {
-	ui.FinalBlock(render.Markdown(summary, ui.FinalBodyWidth()))
+	ui.FinalBlock(summary)
 }
 
 // RateLimitWait вызывается когда провайдер вернул 429 и retry будет повторён

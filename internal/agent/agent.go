@@ -53,6 +53,16 @@ const MaxToolResultBytes = 2048
 // багов "модель забыла что уже это смотрела и крутится по кругу".
 const MaxSameCommandRepeats = 1
 
+// MaxCommandsPerRound — потолок параллельных run_command в одном раунде.
+// Защищает от взрыва токенов: 8 команд × 8 КБ вывода = 64 КБ tool_results
+// в следующий запрос → лёгкий 429 на провайдерах с TPM<60k.
+//
+// 5 — золотая середина: достаточно для диагностики типичного кейса
+// (например status + journalctl + nginx -t + ls конфигов + права на cert)
+// и не разносит контекст. Лишние команды получают отказ с просьбой
+// перевызвать их в следующем раунде если ещё актуально.
+const MaxCommandsPerRound = 5
+
 // InterRoundDelay — пауза между AI-раундами. Не даёт спамить провайдера на
 // быстрых ответах: если модель ответила за 200мс и мы немедленно отправили
 // следующий запрос, легко упереться в TPM. 800мс — компромисс между скоростью
@@ -173,8 +183,30 @@ func Run(
 			}
 		}
 
+		// Счётчик выполненных в этом раунде run_command — для лимита параллельности.
+		// Превышение → отказ (нельзя пропустить вообще: tool-use API требует
+		// ответа на каждый tool_call, иначе следующий запрос не примут).
+		runCommandsThisRound := 0
+
 		for _, tc := range resp.ToolCalls {
-			result := handleToolCall(ctx, tc, io, runHistory)
+			var result string
+			if tc.Name == ToolRunCommand && runCommandsThisRound >= MaxCommandsPerRound {
+				cmdStr, _ := tc.Input["command"].(string)
+				io.Refused(cmdStr, fmt.Sprintf(
+					"лимит %d команд/раунд — модель просит слишком многого",
+					MaxCommandsPerRound))
+				result = fmt.Sprintf(
+					"ОТКАЗАНО: лимит %d команд за один раунд исчерпан. "+
+						"Команда %q не выполнена. Если она ещё нужна — вызови её "+
+						"в следующем раунде, но сначала проанализируй уже полученные "+
+						"результаты. Не запрашивай больше команд чем нужно.",
+					MaxCommandsPerRound, cmdStr)
+			} else {
+				result = handleToolCall(ctx, tc, io, runHistory)
+				if tc.Name == ToolRunCommand {
+					runCommandsThisRound++
+				}
+			}
 			messages = append(messages, provider.Message{
 				Role:       provider.RoleTool,
 				ToolCallID: toolCallIDFor(cli, tc),

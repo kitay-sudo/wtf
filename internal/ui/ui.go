@@ -588,27 +588,275 @@ func RefusedBlock(command, reason string) {
 	fmt.Fprintf(out, "%s%s: %s\n", linePrefix("✗", red), reason, colorize(gray, command))
 }
 
-// FinalBlock — финальный ответ агента.
+// FinalBlock — финальный ответ агента в стиле Claude CLI: дерево из bullet-
+// пунктов. Каждый параграф или элемент списка модели становится отдельным
+// bullet-пунктом "● ...", с правильным word-wrap под ширину терминала и
+// continuation-indent. Inline-`code` подсвечивается голубым.
 //
-// Текст ответа модели должен прийти СЫРЫМ (без glamour/Markdown), потому что
-// мы сами отдаём его в render.Markdown с правильной шириной. Все строки —
-// и заголовок, и тело, и хвост — попадают в stdout с одинаковым 14-пробельным
-// отступом, чтобы вертикали с `[HH:MM:SS]`-префиксами совпадали.
-func FinalBlock(rendered string) {
-	indent := indentStr()
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "%s%s\n", linePrefix("★", yellowBold), colorize(yellowBold, "ответ:"))
-	fmt.Fprintln(os.Stderr)
+// Принимаем СЫРОЙ текст модели — никакого предварительного render.Markdown.
+// Структуру и переносы строим здесь сами.
+func FinalBlock(text string) {
+	out := os.Stderr
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "%s%s\n", linePrefix("★", yellowBold), colorize(yellowBold, "ответ:"))
+	fmt.Fprintln(out)
 
-	rendered = strings.TrimRight(rendered, " \t\r\n")
-	for _, line := range strings.Split(rendered, "\n") {
-		fmt.Fprintln(os.Stdout, indent+line)
+	items := splitFinalItems(text)
+	if len(items) == 0 {
+		fmt.Fprintln(out)
+		return
 	}
-	fmt.Fprintln(os.Stderr)
+
+	// Bullet идёт на колонке 14 (под звёздочку префикса), текст с колонки 16.
+	bulletCol := indentStr()                                     // 14 пробелов
+	textIndent := bulletCol + "  "                               // 16 — для строк продолжения
+	bw := TermWidth() - len(textIndent)
+	if bw < minBodyWidth {
+		bw = minBodyWidth
+	}
+
+	for i, it := range items {
+		if i > 0 {
+			fmt.Fprintln(os.Stdout)
+		}
+		renderFinalItem(it, bulletCol, textIndent, bw)
+	}
+	fmt.Fprintln(out)
 }
 
-// FinalBodyWidth — ширина текста для финального ответа. main.go передаёт её в
-// render.Markdown чтобы glamour сделал правильный wrap.
+// finalItem — один пункт ответа: bullet ● и тело, либо code-block.
+type finalItem struct {
+	kind    string // "bullet" | "code"
+	body    string
+	codeLang string
+}
+
+// splitFinalItems режет текст модели на список пунктов:
+//   - параграфы (разделённые \n\n) → bullet'ы
+//   - markdown-списки (- /* /1.) → каждый элемент свой bullet
+//   - fenced ```...``` → отдельный code-пункт
+func splitFinalItems(text string) []finalItem {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	var items []finalItem
+	lines := strings.Split(text, "\n")
+	var buf []string
+	flushPara := func() {
+		if len(buf) == 0 {
+			return
+		}
+		para := strings.TrimSpace(strings.Join(buf, " "))
+		if para != "" {
+			items = append(items, finalItem{kind: "bullet", body: para})
+		}
+		buf = nil
+	}
+
+	i := 0
+	for i < len(lines) {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		// Fenced code-block
+		if strings.HasPrefix(trimmed, "```") {
+			flushPara()
+			lang := strings.TrimPrefix(trimmed, "```")
+			i++
+			var code []string
+			for i < len(lines) {
+				if strings.HasPrefix(strings.TrimSpace(lines[i]), "```") {
+					i++
+					break
+				}
+				code = append(code, lines[i])
+				i++
+			}
+			items = append(items, finalItem{kind: "code", body: strings.Join(code, "\n"), codeLang: lang})
+			continue
+		}
+
+		// Markdown list item: "- ", "* ", "1. ", "1) "
+		if isListItem(trimmed) {
+			flushPara()
+			body := stripListMarker(trimmed)
+			// продолжения списка — строки с отступом
+			i++
+			for i < len(lines) {
+				next := lines[i]
+				nt := strings.TrimSpace(next)
+				if nt == "" || isListItem(nt) || strings.HasPrefix(nt, "```") {
+					break
+				}
+				if strings.HasPrefix(next, "  ") || strings.HasPrefix(next, "\t") {
+					body += " " + nt
+					i++
+					continue
+				}
+				break
+			}
+			items = append(items, finalItem{kind: "bullet", body: body})
+			continue
+		}
+
+		// Заголовок markdown — превращаем в bullet с **bold**
+		if strings.HasPrefix(trimmed, "#") {
+			flushPara()
+			body := strings.TrimLeft(trimmed, "# ")
+			items = append(items, finalItem{kind: "bullet", body: body})
+			i++
+			continue
+		}
+
+		// Пустая строка → конец параграфа
+		if trimmed == "" {
+			flushPara()
+			i++
+			continue
+		}
+
+		buf = append(buf, trimmed)
+		i++
+	}
+	flushPara()
+	return items
+}
+
+func isListItem(s string) bool {
+	if strings.HasPrefix(s, "- ") || strings.HasPrefix(s, "* ") {
+		return true
+	}
+	// "1. ", "2) "
+	for i, r := range s {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if i > 0 && (r == '.' || r == ')') && i+1 < len(s) && s[i+1] == ' ' {
+			return true
+		}
+		break
+	}
+	return false
+}
+
+func stripListMarker(s string) string {
+	if strings.HasPrefix(s, "- ") {
+		return strings.TrimPrefix(s, "- ")
+	}
+	if strings.HasPrefix(s, "* ") {
+		return strings.TrimPrefix(s, "* ")
+	}
+	for i, r := range s {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if i > 0 && (r == '.' || r == ')') && i+1 < len(s) && s[i+1] == ' ' {
+			return s[i+2:]
+		}
+		break
+	}
+	return s
+}
+
+// renderFinalItem печатает один пункт ответа в stdout с правильным wrap.
+func renderFinalItem(it finalItem, bulletCol, textIndent string, width int) {
+	if it.kind == "code" {
+		// Code-block: каждая строка с отступом textIndent + жёлтый
+		// "$ " только для первой, остальные — с двумя пробелами (continuation).
+		body := strings.TrimRight(it.body, "\n")
+		lines := strings.Split(body, "\n")
+		for j, l := range lines {
+			prefix := textIndent
+			if j == 0 {
+				prefix = bulletCol + colorize(yellowBold, "$ ")
+			} else {
+				prefix = textIndent
+			}
+			fmt.Fprintln(os.Stdout, prefix+colorize(white, l))
+		}
+		return
+	}
+
+	// bullet-пункт: ● + текст с inline-code подсветкой и wrap
+	body := highlightInline(it.body)
+	wrapped := wrapForFinal(body, width)
+	lines := strings.Split(wrapped, "\n")
+	for j, l := range lines {
+		if j == 0 {
+			fmt.Fprintln(os.Stdout, bulletCol+colorize(yellowBold, "● ")+l)
+		} else {
+			fmt.Fprintln(os.Stdout, textIndent+l)
+		}
+	}
+}
+
+// highlightInline подсвечивает `inline code` голубым и **bold** жёлто-жирным.
+func highlightInline(s string) string {
+	var b strings.Builder
+	i := 0
+	for i < len(s) {
+		// **bold**
+		if i+1 < len(s) && s[i] == '*' && s[i+1] == '*' {
+			end := strings.Index(s[i+2:], "**")
+			if end >= 0 {
+				inner := s[i+2 : i+2+end]
+				b.WriteString(colorize(yellowBold, inner))
+				i += 2 + end + 2
+				continue
+			}
+		}
+		// `code`
+		if s[i] == '`' {
+			end := strings.Index(s[i+1:], "`")
+			if end >= 0 {
+				inner := s[i+1 : i+1+end]
+				b.WriteString(colorize(cyan, inner))
+				i += 1 + end + 1
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// wrapForFinal переносит текст по словам с учётом ANSI escape-кодов.
+// Не разрывает слова (даже длинные команды/URL), но не вставляет лишних
+// пробелов в начале строки продолжения — отступ выставляется снаружи.
+func wrapForFinal(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return text
+	}
+	var out strings.Builder
+	col := 0
+	for i, w := range words {
+		wl := visualLen(w)
+		if i == 0 {
+			out.WriteString(w)
+			col = wl
+			continue
+		}
+		if col+1+wl > width {
+			out.WriteByte('\n')
+			out.WriteString(w)
+			col = wl
+		} else {
+			out.WriteByte(' ')
+			out.WriteString(w)
+			col += 1 + wl
+		}
+	}
+	return out.String()
+}
+
+// FinalBodyWidth — ширина текста для финального ответа (для совместимости с
+// caller'ом, но главная логика wrap — внутри FinalBlock).
 func FinalBodyWidth() int {
 	return bodyWidth()
 }
