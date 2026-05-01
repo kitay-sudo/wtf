@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/bitcoff/wtf/internal/config"
 )
@@ -59,6 +60,11 @@ type ChatRequest struct {
 	Messages  []Message
 	Tools     []Tool
 	MaxTokens int
+
+	// OnRateLimit вызывается перед паузой при автоматическом повторе после 429.
+	// attempt — номер уже совершённой попытки (1, 2, ...). UI может использовать
+	// для показа "ждём 5с (попытка 2/3)..." вместо тихого зависания.
+	OnRateLimit func(wait time.Duration, attempt int)
 }
 
 type Client interface {

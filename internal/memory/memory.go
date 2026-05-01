@@ -40,8 +40,17 @@ type Entry struct {
 	TTLDays   int       `json:"ttl_days"` // 0 = вечно
 }
 
+// CurrentSchemaVersion — версия структуры store.json. Инкрементируется при
+// несовместимых изменениях схемы (новые обязательные поля, удалённые типы).
+// Loader умеет читать любую версию ≤ CurrentSchemaVersion и при необходимости
+// мигрировать; неизвестную (выше) — отказывается читать с понятной ошибкой.
+const CurrentSchemaVersion = 1
+
 // Store — все записи памяти. Грузится в начале сессии, сохраняется в конце.
 type Store struct {
+	// Version — версия схемы. 0 у старых файлов = "до introducing версионирования",
+	// автоматически апгрейдится до 1 при первом сохранении.
+	Version int     `json:"version"`
 	Entries []Entry `json:"entries"`
 
 	// Хвост запусков агента — для статистики и решения когда консолидировать.
@@ -99,6 +108,17 @@ func Load() (*Store, error) {
 		return nil, fmt.Errorf("memory: parse store: %w", err)
 	}
 	store.dir = d
+
+	// Будущая версия (юзер откатился на старый wtf) — не пытаемся понять,
+	// чтобы случайно не повредить новый формат. Отдаём пустой Store и пишем
+	// предупреждение через ошибку — main.go его покажет.
+	if store.Version > CurrentSchemaVersion {
+		empty := &Store{Version: CurrentSchemaVersion, dir: d}
+		return empty, fmt.Errorf("memory: store.json версии %d не поддерживается (текущая %d) — память пропускается",
+			store.Version, CurrentSchemaVersion)
+	}
+	// Старые файлы (Version == 0) принимаем как есть; апгрейд произойдёт при Save.
+
 	store.dropExpired()
 	return store, nil
 }
@@ -112,6 +132,10 @@ func (s *Store) Save() error {
 			return err
 		}
 		s.dir = d
+	}
+	// Апгрейд старых файлов: при сохранении проставляем актуальную версию.
+	if s.Version < CurrentSchemaVersion {
+		s.Version = CurrentSchemaVersion
 	}
 	p := filepath.Join(s.dir, "store.json")
 	tmp := p + ".tmp"

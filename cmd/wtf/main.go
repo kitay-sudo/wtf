@@ -16,10 +16,13 @@ package main
 import (
 	"bufio"
 	stdctx "context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -67,6 +70,7 @@ func printHelp() {
 Опции:
   --provider <name>            claude | openai | gemini
   --lang <ru|en>               язык ответа (по умолчанию из config)
+  -v, --verbose                показывать полный вывод диагностических команд
 
 Команды:
   wtf config                   настройка провайдера, ключей, моделей
@@ -86,8 +90,9 @@ func printHelp() {
 // runAgent — основной режим. Парсит позиционный промпт, запускает agent.Run.
 func runAgent(args []string) {
 	// Флаги парсим вручную чтобы не съесть слова из промпта.
-	// Правило: если первый токен — "--что-то", это флаг. Иначе всё в промпт.
+	// Правило: если токен — известный флаг (с --), он снимается; иначе уходит в промпт.
 	var providerFlag, langFlag string
+	var verbose bool
 	var passthrough []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -102,6 +107,8 @@ func runAgent(args []string) {
 			i++
 		case strings.HasPrefix(a, "--lang="):
 			langFlag = strings.TrimPrefix(a, "--lang=")
+		case a == "--verbose" || a == "-v":
+			verbose = true
 		default:
 			passthrough = append(passthrough, a)
 		}
@@ -155,19 +162,21 @@ func runAgent(args []string) {
 
 	envInfo := wctx.Collect()
 
+	// NotifyContext — отменяет ctx по SIGINT/SIGTERM; agent видит ctx.Done()
+	// и аккуратно завершает текущий HTTP-запрос. После этого мы успеем сохранить
+	// notes (если уже были) и память. Жёсткий таймаут 5 минут как backup —
+	// чтобы случайно не зависнуть в бесконечном retry.
 	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 5*time.Minute)
 	defer cancel()
+	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignal()
 
-	io := &consoleIO{}
+	io := &consoleIO{verbose: verbose}
 
-	res, err := agent.Run(ctx, cli, envInfo, store, io, question, piped, lang)
-	if err != nil {
-		ui.Err(fmt.Sprintf("агент: %v", err))
-		os.Exit(1)
-	}
+	res, runErr := agent.Run(ctx, cli, envInfo, store, io, question, piped, lang)
 
-	// Записываем notes в память, если они есть.
-	if len(res.Notes) > 0 {
+	// Сохраняем что есть, даже если агент прерван — это и есть смысл graceful shutdown.
+	if res != nil && len(res.Notes) > 0 {
 		for _, n := range res.Notes {
 			store.Add(n)
 		}
@@ -176,6 +185,16 @@ func runAgent(args []string) {
 
 	if err := store.Save(); err != nil {
 		ui.Warn(fmt.Sprintf("не удалось сохранить память: %v", err))
+	}
+
+	if runErr != nil {
+		// Прерывание Ctrl+C — нормальный выход кодом 130 (SIGINT convention).
+		if errors.Is(runErr, stdctx.Canceled) {
+			ui.Info("прервано пользователем — память сохранена")
+			os.Exit(130)
+		}
+		ui.Err(fmt.Sprintf("агент: %v", runErr))
+		os.Exit(1)
 	}
 
 	// Консолидация — best-effort. Если упала — не страшно, в следующий раз попробуем.
@@ -225,8 +244,17 @@ func promptForQuestion() string {
 }
 
 // consoleIO — реализация agent.IO для обычного терминала.
+//
+// Два режима:
+//   - quiet (по умолчанию): команда сворачивается в одну строку со спиннером,
+//     полный вывод не печатается (но скармливается AI).
+//   - verbose (-v / --verbose): полные блоки команды и вывода как раньше.
 type consoleIO struct {
-	sp *ui.Spinner
+	verbose       bool
+	sp            *ui.Spinner // спиннер для AI-раздумий
+	cmdSp         *ui.Spinner // спиннер во время выполнения команды (quiet)
+	pendingReason string      // reason запущенной команды — печатаем при результате
+	pendingCmd    string      // команда — то же самое
 }
 
 func (c *consoleIO) Thinking(label string) {
@@ -247,11 +275,34 @@ func (c *consoleIO) StopThinking(success bool, _ string) {
 }
 
 func (c *consoleIO) StepCommand(reason, command string) {
-	ui.CommandHeader(reason, command)
+	if c.verbose {
+		ui.CommandHeader(reason, command)
+		return
+	}
+	// Quiet-режим: вместо заголовка крутим спиннер с reason+командой.
+	c.pendingReason = reason
+	c.pendingCmd = command
+	label := command
+	if reason != "" {
+		label = reason + " · " + command
+	}
+	c.cmdSp = ui.NewSpinner(label)
+	c.cmdSp.Start()
 }
 
 func (c *consoleIO) CommandOutput(_ string, output string, exit int, dur time.Duration, timedOut bool) {
-	ui.CommandResult(output, exit, dur, timedOut)
+	if c.verbose {
+		ui.CommandResult(output, exit, dur, timedOut)
+		return
+	}
+	// Quiet: останавливаем спиннер, печатаем итог одной строкой.
+	if c.cmdSp != nil {
+		c.cmdSp.StopOK("")
+		c.cmdSp = nil
+	}
+	ui.CommandLineQuiet(c.pendingReason, c.pendingCmd, output, exit, dur, timedOut)
+	c.pendingReason = ""
+	c.pendingCmd = ""
 }
 
 func (c *consoleIO) UserCommand(reason, command string) {
@@ -264,6 +315,23 @@ func (c *consoleIO) Refused(command, reason string) {
 
 func (c *consoleIO) Final(summary string) {
 	ui.FinalBlock(render.Markdown(summary))
+}
+
+// RateLimitWait вызывается когда провайдер вернул 429 и retry будет повторён
+// автоматически. Останавливаем все активные спиннеры (иначе их строки будут
+// перебивать сообщение), показываем юзеру что происходит, и не пытаемся
+// возобновить — agent сам стартует следующий Thinking при retry.
+func (c *consoleIO) RateLimitWait(wait time.Duration, attempt int) {
+	if c.sp != nil {
+		c.sp.StopFail("")
+		c.sp = nil
+	}
+	if c.cmdSp != nil {
+		c.cmdSp.StopFail("")
+		c.cmdSp = nil
+	}
+	ui.Warn(fmt.Sprintf("rate limit · повтор через %s (попытка %d/%d)",
+		wait.Round(100*time.Millisecond), attempt+1, 4))
 }
 
 func anyKeyConfigured(cfg *config.Config) bool {

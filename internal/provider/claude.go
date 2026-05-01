@@ -63,6 +63,12 @@ type claudeResp struct {
 }
 
 func (c *claudeClient) Chat(ctx context.Context, req ChatRequest) (*Response, error) {
+	return withRetry(ctx, req.OnRateLimit, func() (*Response, error) {
+		return c.doChat(ctx, req)
+	})
+}
+
+func (c *claudeClient) doChat(ctx context.Context, req ChatRequest) (*Response, error) {
 	maxTok := req.MaxTokens
 	if maxTok == 0 {
 		maxTok = 2048
@@ -108,6 +114,14 @@ func (c *claudeClient) Chat(ctx context.Context, req ChatRequest) (*Response, er
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 429 {
+		return nil, &rateLimitError{
+			Provider:   "claude",
+			RetryAfter: parseRateLimit(resp, string(data)),
+			Body:       string(data),
+		}
+	}
 
 	var parsed claudeResp
 	if err := json.Unmarshal(data, &parsed); err != nil {

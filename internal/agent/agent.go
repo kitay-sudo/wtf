@@ -29,6 +29,23 @@ import (
 // раундов; 15 — щедрый запас на сложные кейсы.
 const MaxIterations = 15
 
+// KeepFullRounds — сколько последних раундов держать в истории с ПОЛНЫМИ
+// tool_result. Старые раунды сжимаются до короткой строки-маркера, чтобы
+// не раздувать контекст и не упираться в TPM-лимиты провайдеров.
+//
+// 4 раунда обычно достаточно: модель помнит самое свежее, а старое всё равно
+// уже отражено в её собственных reasoning-сообщениях.
+const KeepFullRounds = 4
+
+// MaxToolResultBytes — потолок одного tool_result после которого его обрежем
+// при trim'е. До этого порога — оставляем как есть.
+const MaxToolResultBytes = 2048
+
+// MaxSameCommandRepeats — сколько раз модели можно вызвать одну и ту же команду.
+// 1 = никогда не повторяем (после первого вызова — отказ). Это убирает класс
+// багов "модель забыла что уже это смотрела и крутится по кругу".
+const MaxSameCommandRepeats = 1
+
 // IO — абстракция вывода для агента. Главный поток печатает в терминал;
 // тесты могут подсунуть буфер. Все методы принимают уже отформатированный текст.
 type IO interface {
@@ -39,6 +56,7 @@ type IO interface {
 	Final(summary string)                      // финальный ответ
 	Thinking(label string)                     // спиннер во время AI-запроса
 	StopThinking(success bool, label string)   // конец спиннера
+	RateLimitWait(wait time.Duration, attempt int) // провайдер просит подождать
 }
 
 // Result — что сессия вернула наружу.
@@ -78,15 +96,21 @@ func Run(
 	res := &Result{}
 	tools := Tools()
 
+	// runHistory — сколько раз каждая команда уже была запущена в этой сессии.
+	// Ключ — нормализованная строка команды (после TrimSpace + collapse spaces).
+	// Используется в handleToolCall чтобы отказывать в повторах.
+	runHistory := map[string]int{}
+
 	for i := 0; i < MaxIterations; i++ {
 		res.Iterations = i + 1
 
 		io.Thinking(fmt.Sprintf("думаю (%s)...", cli.Name()))
 		resp, err := cli.Chat(ctx, provider.ChatRequest{
-			System:    system,
-			Messages:  messages,
-			Tools:     tools,
-			MaxTokens: 2048,
+			System:      system,
+			Messages:    trimHistory(messages, KeepFullRounds),
+			Tools:       tools,
+			MaxTokens:   2048,
+			OnRateLimit: io.RateLimitWait,
 		})
 		io.StopThinking(err == nil, "")
 		if err != nil {
@@ -126,7 +150,7 @@ func Run(
 		}
 
 		for _, tc := range resp.ToolCalls {
-			result := handleToolCall(ctx, tc, io)
+			result := handleToolCall(ctx, tc, io, runHistory)
 			messages = append(messages, provider.Message{
 				Role:       provider.RoleTool,
 				ToolCallID: toolCallIDFor(cli, tc),
@@ -149,10 +173,11 @@ func Run(
 	})
 	io.Thinking("финальный ответ...")
 	resp, err := cli.Chat(ctx, provider.ChatRequest{
-		System:    system,
-		Messages:  messages,
-		Tools:     tools,
-		MaxTokens: 1024,
+		System:      system,
+		Messages:    trimHistory(messages, KeepFullRounds),
+		Tools:       tools,
+		MaxTokens:   1024,
+		OnRateLimit: io.RateLimitWait,
 	})
 	io.StopThinking(err == nil, "")
 	if err != nil {
@@ -178,7 +203,10 @@ func Run(
 }
 
 // handleToolCall выполняет один tool_call и возвращает строку для tool_result.
-func handleToolCall(ctx context.Context, tc provider.ToolCall, io IO) string {
+//
+// runHistory — счётчик уже запущенных команд в этой сессии (нормализованная строка → count).
+// Используем для отказа от повторного запуска одной и той же команды.
+func handleToolCall(ctx context.Context, tc provider.ToolCall, io IO, runHistory map[string]int) string {
 	switch tc.Name {
 	case ToolRunCommand:
 		command, _ := tc.Input["command"].(string)
@@ -188,6 +216,17 @@ func handleToolCall(ctx context.Context, tc provider.ToolCall, io IO) string {
 			return "ошибка: пустая команда"
 		}
 
+		// Защита от зацикливания: модель иногда забывает что уже это смотрела.
+		// После N запусков той же команды — отказываем и просим использовать
+		// предыдущий вывод.
+		key := normalizeCommand(command)
+		if runHistory[key] >= MaxSameCommandRepeats {
+			io.Refused(command, "уже выполнялась — модель должна использовать предыдущий вывод")
+			return fmt.Sprintf("ОТКАЗАНО: команда %q уже выполнялась в этой сессии. "+
+				"Посмотри её вывод в предыдущих раундах. Если нужны другие данные — "+
+				"запусти ДРУГУЮ команду или вызови finish.", command)
+		}
+
 		class := wexec.Classify(command)
 		if class != wexec.ClassSafe {
 			io.Refused(command, fmt.Sprintf("команда классифицирована как %s — выполни через show_command", class))
@@ -195,6 +234,8 @@ func handleToolCall(ctx context.Context, tc provider.ToolCall, io IO) string {
 				"Используй show_command вместо run_command для destructive-операций.",
 				command, class)
 		}
+
+		runHistory[key]++
 
 		io.StepCommand(reason, command)
 		result := wexec.Run(ctx, command)
@@ -265,6 +306,89 @@ func parseFinish(tc *provider.ToolCall, res *Result) {
 			}
 		}
 	}
+}
+
+// trimHistory возвращает копию messages где старые tool_result сжаты до
+// коротких заглушек. Сохраняем всё что относится к последним keepRounds раундам
+// "assistant с tool_calls + соответствующие tool результаты".
+//
+// Алгоритм:
+//  1. Идём с конца, считаем "раунды" (раунд = assistant-сообщение с tool_calls).
+//  2. Пока счётчик ≤ keepRounds — копируем как есть.
+//  3. Дальше — для tool-сообщений заменяем Text на маркер, для assistant
+//     с tool_calls обнуляем длинные текстовые поля.
+//
+// Это снижает context size в разы при долгих сессиях без потери "линии мысли"
+// модели — она помнит ЧТО запускала и видит свежие результаты.
+func trimHistory(messages []provider.Message, keepRounds int) []provider.Message {
+	if len(messages) == 0 || keepRounds <= 0 {
+		return messages
+	}
+
+	// Подсчёт раундов с конца. Раунд = появление assistant-сообщения.
+	roundCount := 0
+	cutoff := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == provider.RoleAssistant && len(messages[i].ToolCalls) > 0 {
+			roundCount++
+			if roundCount > keepRounds {
+				cutoff = i + 1 // всё что < cutoff — старое, пора сжимать
+				break
+			}
+		}
+	}
+	if cutoff == 0 {
+		// Раундов меньше keepRounds — ничего не трогаем.
+		return messages
+	}
+
+	out := make([]provider.Message, len(messages))
+	for i, m := range messages {
+		if i >= cutoff {
+			out[i] = m
+			continue
+		}
+		switch m.Role {
+		case provider.RoleTool:
+			// Сжимаем результат старой команды до короткой пометки.
+			out[i] = provider.Message{
+				Role:       m.Role,
+				ToolCallID: m.ToolCallID,
+				Text:       summarizeToolResult(m.Text),
+			}
+		case provider.RoleAssistant:
+			// Текст оставляем (он короткий — "мысли" модели), tool_calls тоже —
+			// они нужны для протокола (пара call→result).
+			out[i] = m
+		default:
+			// User-сообщения и прочее — копируем как есть.
+			out[i] = m
+		}
+	}
+	return out
+}
+
+// normalizeCommand схлопывает повторные пробелы и обрезает края, чтобы
+// "ls   -la" и "ls -la" считались одной командой при детекте дублей.
+func normalizeCommand(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// summarizeToolResult ужимает длинный stdout до 1-2 строк маркера.
+// Сохраняем exit-код и факт что вывод был обрезан.
+func summarizeToolResult(s string) string {
+	if len(s) <= 200 {
+		return s
+	}
+	// Пытаемся вытащить первую строку (там обычно "exit=N duration=...")
+	lineEnd := strings.IndexByte(s, '\n')
+	header := s
+	if lineEnd > 0 && lineEnd < 200 {
+		header = s[:lineEnd]
+	} else if len(header) > 200 {
+		header = header[:200]
+	}
+	return header + "\n[...вывод обрезан при сжатии истории, см. предыдущие раунды если нужны детали...]"
 }
 
 // toolCallIDFor возвращает идентификатор для tool_result.

@@ -287,8 +287,8 @@ func max(a, b int) int {
 	return b
 }
 
-// CommandHeader — заголовок блока команды (───→ команда ──────).
-// Используется агентом перед запуском read-only команды.
+// CommandHeader — verbose-режим: показываем reason + команду перед запуском.
+// В тихом режиме это место занимает спиннер CommandRunningStart.
 func CommandHeader(reason, command string) {
 	out := os.Stderr
 	fmt.Fprintln(out)
@@ -296,8 +296,55 @@ func CommandHeader(reason, command string) {
 	fmt.Fprintf(out, "  %s %s\n", colorize(yellowBold, "$"), colorize(white, command))
 }
 
-// CommandResult — компактный итог выполнения команды.
-// Если timed_out=true или exit≠0 — выделяем цветом.
+// CommandLineQuiet печатает финальную одну строку об уже выполненной команде
+// в тихом режиме. Формат:
+//
+//	✓ reason · команда · 142ms · 3.2 KB
+//	✗ reason · команда · exit=1 · 142ms                       (если упало)
+//	⏱ reason · команда · таймаут                              (если timeout)
+//
+// Использовать ПОСЛЕ остановки спиннера выполнения.
+func CommandLineQuiet(reason, command string, output string, exit int, dur time.Duration, timedOut bool) {
+	out := os.Stderr
+	icon := colorize(yellowBold, "✓")
+	if exit != 0 {
+		icon = colorize(red, "✗")
+	}
+	if timedOut {
+		icon = colorize(red, "⏱")
+	}
+	parts := []string{}
+	if reason != "" {
+		parts = append(parts, colorize(gray, reason))
+	}
+	parts = append(parts, colorize(white, command))
+	parts = append(parts, colorize(gray, fmtDur(dur)))
+	if exit != 0 && !timedOut {
+		parts = append(parts, colorize(yellow, fmt.Sprintf("exit=%d", exit)))
+	}
+	if timedOut {
+		parts = append(parts, colorize(red, "таймаут"))
+	}
+	if output != "" {
+		parts = append(parts, colorize(gray, fmtBytes(len(output))))
+	} else if !timedOut {
+		parts = append(parts, colorize(gray, "(пусто)"))
+	}
+	fmt.Fprintf(out, "  %s %s\n", icon, strings.Join(parts, colorize(gray, " · ")))
+}
+
+func fmtBytes(n int) string {
+	switch {
+	case n < 1024:
+		return fmt.Sprintf("%dB", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1fKB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.1fMB", float64(n)/(1024*1024))
+	}
+}
+
+// CommandResult — verbose-режим: полный вывод с заголовком/футером.
 func CommandResult(output string, exit int, dur time.Duration, timedOut bool) {
 	out := os.Stderr
 	status := colorize(gray, fmt.Sprintf("exit=%d · %s", exit, fmtDur(dur)))

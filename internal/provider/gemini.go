@@ -76,6 +76,12 @@ type geminiResp struct {
 // Для совместимости с нашим интерфейсом мы храним synthesised id в Tool-сообщениях,
 // но при отправке в Gemini используем только имя функции.
 func (c *geminiClient) Chat(ctx context.Context, req ChatRequest) (*Response, error) {
+	return withRetry(ctx, req.OnRateLimit, func() (*Response, error) {
+		return c.doChat(ctx, req)
+	})
+}
+
+func (c *geminiClient) doChat(ctx context.Context, req ChatRequest) (*Response, error) {
 	maxTok := req.MaxTokens
 	if maxTok == 0 {
 		maxTok = 2048
@@ -120,6 +126,14 @@ func (c *geminiClient) Chat(ctx context.Context, req ChatRequest) (*Response, er
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 429 {
+		return nil, &rateLimitError{
+			Provider:   "gemini",
+			RetryAfter: parseRateLimit(resp, string(data)),
+			Body:       string(data),
+		}
+	}
 
 	var parsed geminiResp
 	if err := json.Unmarshal(data, &parsed); err != nil {

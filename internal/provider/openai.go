@@ -63,6 +63,12 @@ type openaiResp struct {
 }
 
 func (c *openaiClient) Chat(ctx context.Context, req ChatRequest) (*Response, error) {
+	return withRetry(ctx, req.OnRateLimit, func() (*Response, error) {
+		return c.doChat(ctx, req)
+	})
+}
+
+func (c *openaiClient) doChat(ctx context.Context, req ChatRequest) (*Response, error) {
 	maxTok := req.MaxTokens
 	if maxTok == 0 {
 		maxTok = 2048
@@ -106,6 +112,14 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatRequest) (*Response, er
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 429 {
+		return nil, &rateLimitError{
+			Provider:   "openai",
+			RetryAfter: parseRateLimit(resp, string(data)),
+			Body:       string(data),
+		}
+	}
 
 	var parsed openaiResp
 	if err := json.Unmarshal(data, &parsed); err != nil {
