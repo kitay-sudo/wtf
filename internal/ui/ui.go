@@ -588,27 +588,23 @@ func RefusedBlock(command, reason string) {
 	fmt.Fprintf(out, "%s%s: %s\n", linePrefix("✗", red), reason, colorize(gray, command))
 }
 
-// FinalBlock — финальный ответ агента. Печатается одной "лентой":
+// FinalBlock — финальный ответ агента. Печатается одной сплошной "лентой":
 //
-//	[HH:MM:SS] ★ ответ: первая строка первого параграфа
-//	                    продолжение, выровненное под текст
+//	[HH:MM:SS] ★ Ответ: первая строка ответа, далее идут все
+//	                    остальные слова через пробел с word-wrap
+//	                    и выровнены под колонку текста.
 //
-//	                    следующий параграф …
-//
-// Текст приходит сырой (без glamour); переносы и структуру строим здесь.
-// Списки/code-блоки рендерятся как отдельные параграфы, разделённые пустой
-// строкой.
+// Все переводы строк / параграфы / списки из текста модели схлопываются в
+// один поток слов — никаких пустых строк внутри ответа. Code-блоки fenced
+// (```) выводятся отдельно после ленты текста, но без пустой строки между
+// ними и хвостом текста.
 func FinalBlock(text string) {
 	out := os.Stderr
 	fmt.Fprintln(out)
 
-	items := splitFinalItems(text)
+	prose, codes := flattenFinal(text)
 
-	// Префикс заголовка занимает 21 видимый символ:
-	//   "[HH:MM:SS] " (11) + "★ " (2) + "ответ: " (7) — итого 20, но
-	// Цветовые ANSI-коды не считаются. Под continuation выравниваемся
-	// на колонку, где начинается первое слово ответа.
-	headerLabel := "ответ: "
+	headerLabel := "Ответ: "
 	header := linePrefix("★", yellowBold) + colorize(yellowBold, headerLabel)
 	textIndent := strings.Repeat(" ", indentWidth+visualLen(headerLabel))
 	bw := TermWidth() - len(textIndent)
@@ -616,61 +612,59 @@ func FinalBlock(text string) {
 		bw = minBodyWidth
 	}
 
-	if len(items) == 0 {
+	if prose == "" && len(codes) == 0 {
 		fmt.Fprintln(out, header)
 		return
 	}
 
-	// Печатаем header + первая строка ответа в одной строке.
-	for i, it := range items {
-		isFirst := i == 0
-		if !isFirst {
-			fmt.Fprintln(os.Stdout)
+	// Сплошной wrap всего текста. Первая строка идёт после header,
+	// остальные — с textIndent.
+	if prose != "" {
+		body := highlightInline(prose)
+		wrapped := wrapForFinal(body, bw)
+		for j, l := range strings.Split(wrapped, "\n") {
+			if j == 0 {
+				fmt.Fprintln(os.Stdout, header+l)
+			} else {
+				fmt.Fprintln(os.Stdout, textIndent+l)
+			}
 		}
-		renderFinalParagraph(it, header, textIndent, bw, isFirst)
+	} else {
+		// Текста нет, только code — печатаем header один.
+		fmt.Fprintln(os.Stdout, header)
+	}
+
+	for _, c := range codes {
+		body := strings.TrimRight(c, "\n")
+		lines := strings.Split(body, "\n")
+		for j, l := range lines {
+			if j == 0 {
+				fmt.Fprintln(os.Stdout, textIndent+colorize(yellowBold, "$ ")+colorize(white, l))
+			} else {
+				fmt.Fprintln(os.Stdout, textIndent+"  "+colorize(white, l))
+			}
+		}
 	}
 	fmt.Fprintln(out)
 }
 
-// finalItem — один пункт ответа: bullet ● и тело, либо code-block.
-type finalItem struct {
-	kind    string // "bullet" | "code"
-	body    string
-	codeLang string
-}
-
-// splitFinalItems режет текст модели на список пунктов:
-//   - параграфы (разделённые \n\n) → bullet'ы
-//   - markdown-списки (- /* /1.) → каждый элемент свой bullet
-//   - fenced ```...``` → отдельный code-пункт
-func splitFinalItems(text string) []finalItem {
+// flattenFinal схлопывает текст модели в один параграф (prose) и список
+// fenced-code-блоков (codes). Списки markdown превращаются в "1) item, 2) item"
+// внутри prose; code-блоки вынимаются и идут отдельно.
+func flattenFinal(text string) (prose string, codes []string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil
+		return "", nil
 	}
-	var items []finalItem
 	lines := strings.Split(text, "\n")
-	var buf []string
-	flushPara := func() {
-		if len(buf) == 0 {
-			return
-		}
-		para := strings.TrimSpace(strings.Join(buf, " "))
-		if para != "" {
-			items = append(items, finalItem{kind: "bullet", body: para})
-		}
-		buf = nil
-	}
-
+	var words []string
+	listIdx := 0
 	i := 0
 	for i < len(lines) {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
-		// Fenced code-block
 		if strings.HasPrefix(trimmed, "```") {
-			flushPara()
-			lang := strings.TrimPrefix(trimmed, "```")
 			i++
 			var code []string
 			for i < len(lines) {
@@ -681,54 +675,34 @@ func splitFinalItems(text string) []finalItem {
 				code = append(code, lines[i])
 				i++
 			}
-			items = append(items, finalItem{kind: "code", body: strings.Join(code, "\n"), codeLang: lang})
+			codes = append(codes, strings.Join(code, "\n"))
 			continue
 		}
 
-		// Markdown list item: "- ", "* ", "1. ", "1) "
-		if isListItem(trimmed) {
-			flushPara()
-			body := stripListMarker(trimmed)
-			// продолжения списка — строки с отступом
-			i++
-			for i < len(lines) {
-				next := lines[i]
-				nt := strings.TrimSpace(next)
-				if nt == "" || isListItem(nt) || strings.HasPrefix(nt, "```") {
-					break
-				}
-				if strings.HasPrefix(next, "  ") || strings.HasPrefix(next, "\t") {
-					body += " " + nt
-					i++
-					continue
-				}
-				break
-			}
-			items = append(items, finalItem{kind: "bullet", body: body})
-			continue
-		}
-
-		// Заголовок markdown — превращаем в bullet с **bold**
-		if strings.HasPrefix(trimmed, "#") {
-			flushPara()
-			body := strings.TrimLeft(trimmed, "# ")
-			items = append(items, finalItem{kind: "bullet", body: body})
-			i++
-			continue
-		}
-
-		// Пустая строка → конец параграфа
 		if trimmed == "" {
-			flushPara()
 			i++
 			continue
 		}
 
-		buf = append(buf, trimmed)
+		// Заголовок markdown — снимаем "#", оставляем как обычный текст.
+		if strings.HasPrefix(trimmed, "#") {
+			trimmed = strings.TrimLeft(trimmed, "# ")
+		}
+
+		// Маркер списка → переводим в "1) текст" (или просто " · текст" для bullet).
+		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+			trimmed = " · " + trimmed[2:]
+		} else if isListItem(trimmed) {
+			body := stripListMarker(trimmed)
+			listIdx++
+			trimmed = fmt.Sprintf("%d) %s", listIdx, body)
+		}
+
+		words = append(words, trimmed)
 		i++
 	}
-	flushPara()
-	return items
+	prose = strings.Join(words, " ")
+	return prose, codes
 }
 
 func isListItem(s string) bool {
@@ -765,43 +739,6 @@ func stripListMarker(s string) string {
 		break
 	}
 	return s
-}
-
-// renderFinalParagraph печатает один параграф ответа.
-// Если isFirst=true, то первая строка печатается сразу после header
-// ("[HH:MM:SS] ★ ответ: "); строки продолжения — с textIndent.
-// Для остальных параграфов первая строка тоже идёт с textIndent (визуальная
-// колонка совпадает с местом где начинался текст после "ответ: ").
-//
-// Для code-блоков header игнорируется (code всегда начинается с textIndent
-// и каждой строкой) — но ставится с префиксом "$ " на первой.
-func renderFinalParagraph(it finalItem, header, textIndent string, width int, isFirst bool) {
-	if it.kind == "code" {
-		body := strings.TrimRight(it.body, "\n")
-		lines := strings.Split(body, "\n")
-		for j, l := range lines {
-			if j == 0 {
-				fmt.Fprintln(os.Stdout, textIndent+colorize(yellowBold, "$ ")+colorize(white, l))
-			} else {
-				fmt.Fprintln(os.Stdout, textIndent+"  "+colorize(white, l))
-			}
-		}
-		return
-	}
-
-	body := highlightInline(it.body)
-	wrapped := wrapForFinal(body, width)
-	lines := strings.Split(wrapped, "\n")
-	for j, l := range lines {
-		switch {
-		case j == 0 && isFirst:
-			fmt.Fprintln(os.Stdout, header+l)
-		case j == 0 && !isFirst:
-			fmt.Fprintln(os.Stdout, textIndent+l)
-		default:
-			fmt.Fprintln(os.Stdout, textIndent+l)
-		}
-	}
 }
 
 // highlightInline подсвечивает `inline code` голубым и **bold** жёлто-жирным.
