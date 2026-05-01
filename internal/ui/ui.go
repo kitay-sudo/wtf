@@ -588,38 +588,46 @@ func RefusedBlock(command, reason string) {
 	fmt.Fprintf(out, "%s%s: %s\n", linePrefix("✗", red), reason, colorize(gray, command))
 }
 
-// FinalBlock — финальный ответ агента в стиле Claude CLI: дерево из bullet-
-// пунктов. Каждый параграф или элемент списка модели становится отдельным
-// bullet-пунктом "● ...", с правильным word-wrap под ширину терминала и
-// continuation-indent. Inline-`code` подсвечивается голубым.
+// FinalBlock — финальный ответ агента. Печатается одной "лентой":
 //
-// Принимаем СЫРОЙ текст модели — никакого предварительного render.Markdown.
-// Структуру и переносы строим здесь сами.
+//	[HH:MM:SS] ★ ответ: первая строка первого параграфа
+//	                    продолжение, выровненное под текст
+//
+//	                    следующий параграф …
+//
+// Текст приходит сырой (без glamour); переносы и структуру строим здесь.
+// Списки/code-блоки рендерятся как отдельные параграфы, разделённые пустой
+// строкой.
 func FinalBlock(text string) {
 	out := os.Stderr
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "%s%s\n", linePrefix("★", yellowBold), colorize(yellowBold, "ответ:"))
-	fmt.Fprintln(out)
 
 	items := splitFinalItems(text)
-	if len(items) == 0 {
-		fmt.Fprintln(out)
-		return
-	}
 
-	// Bullet идёт на колонке 14 (под звёздочку префикса), текст с колонки 16.
-	bulletCol := indentStr()                                     // 14 пробелов
-	textIndent := bulletCol + "  "                               // 16 — для строк продолжения
+	// Префикс заголовка занимает 21 видимый символ:
+	//   "[HH:MM:SS] " (11) + "★ " (2) + "ответ: " (7) — итого 20, но
+	// Цветовые ANSI-коды не считаются. Под continuation выравниваемся
+	// на колонку, где начинается первое слово ответа.
+	headerLabel := "ответ: "
+	header := linePrefix("★", yellowBold) + colorize(yellowBold, headerLabel)
+	textIndent := strings.Repeat(" ", indentWidth+visualLen(headerLabel))
 	bw := TermWidth() - len(textIndent)
 	if bw < minBodyWidth {
 		bw = minBodyWidth
 	}
 
+	if len(items) == 0 {
+		fmt.Fprintln(out, header)
+		return
+	}
+
+	// Печатаем header + первая строка ответа в одной строке.
 	for i, it := range items {
-		if i > 0 {
+		isFirst := i == 0
+		if !isFirst {
 			fmt.Fprintln(os.Stdout)
 		}
-		renderFinalItem(it, bulletCol, textIndent, bw)
+		renderFinalParagraph(it, header, textIndent, bw, isFirst)
 	}
 	fmt.Fprintln(out)
 }
@@ -759,33 +767,38 @@ func stripListMarker(s string) string {
 	return s
 }
 
-// renderFinalItem печатает один пункт ответа в stdout с правильным wrap.
-func renderFinalItem(it finalItem, bulletCol, textIndent string, width int) {
+// renderFinalParagraph печатает один параграф ответа.
+// Если isFirst=true, то первая строка печатается сразу после header
+// ("[HH:MM:SS] ★ ответ: "); строки продолжения — с textIndent.
+// Для остальных параграфов первая строка тоже идёт с textIndent (визуальная
+// колонка совпадает с местом где начинался текст после "ответ: ").
+//
+// Для code-блоков header игнорируется (code всегда начинается с textIndent
+// и каждой строкой) — но ставится с префиксом "$ " на первой.
+func renderFinalParagraph(it finalItem, header, textIndent string, width int, isFirst bool) {
 	if it.kind == "code" {
-		// Code-block: каждая строка с отступом textIndent + жёлтый
-		// "$ " только для первой, остальные — с двумя пробелами (continuation).
 		body := strings.TrimRight(it.body, "\n")
 		lines := strings.Split(body, "\n")
 		for j, l := range lines {
-			prefix := textIndent
 			if j == 0 {
-				prefix = bulletCol + colorize(yellowBold, "$ ")
+				fmt.Fprintln(os.Stdout, textIndent+colorize(yellowBold, "$ ")+colorize(white, l))
 			} else {
-				prefix = textIndent
+				fmt.Fprintln(os.Stdout, textIndent+"  "+colorize(white, l))
 			}
-			fmt.Fprintln(os.Stdout, prefix+colorize(white, l))
 		}
 		return
 	}
 
-	// bullet-пункт: ● + текст с inline-code подсветкой и wrap
 	body := highlightInline(it.body)
 	wrapped := wrapForFinal(body, width)
 	lines := strings.Split(wrapped, "\n")
 	for j, l := range lines {
-		if j == 0 {
-			fmt.Fprintln(os.Stdout, bulletCol+colorize(yellowBold, "● ")+l)
-		} else {
+		switch {
+		case j == 0 && isFirst:
+			fmt.Fprintln(os.Stdout, header+l)
+		case j == 0 && !isFirst:
+			fmt.Fprintln(os.Stdout, textIndent+l)
+		default:
 			fmt.Fprintln(os.Stdout, textIndent+l)
 		}
 	}
