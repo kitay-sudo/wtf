@@ -144,27 +144,27 @@ function Hero() {
 
         <Reveal delay={0.05}>
           <h1 className="mt-6 text-center text-4xl md:text-6xl font-semibold tracking-tight leading-[1.05]">
-            Не понял что в терминале — пиши <br />
+            Опиши проблему словами — <br />
             <span className="inline-flex items-center gap-3 align-middle">
               <span className="bg-gradient-to-r from-amber-400 to-yellow-300 bg-clip-text text-transparent">
                 wtf
               </span>
               <WtfMark size={56} />
-            </span>
+            </span>{' '}
+            <span className="text-zinc-200">сам всё проверит</span>
           </h1>
         </Reveal>
 
         <Reveal delay={0.08}>
           <p className="mt-6 text-center text-lg md:text-xl text-zinc-200 max-w-2xl mx-auto leading-relaxed font-medium">
-            Любой непонятный вывод — упавший stack trace, status сервиса, дамп конфига, странный JSON, лог nginx — пиши <code className="font-mono text-amber-300">wtf</code> и получай человеческое объяснение прямо в терминале. Если есть что чинить — ещё и 2-3 готовых действия.
+            Терминальный sysadmin-агент. Пиши <code className="font-mono text-amber-300">wtf nginx не стартует</code> — он сам выполнит диагностические команды, прочитает логи, найдёт причину и покажет точные команды для починки.
           </p>
         </Reveal>
 
         <Reveal delay={0.16}>
           <p className="mt-5 text-center text-sm md:text-base text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-            Один Go-бинарник. Три AI-провайдера на выбор: Claude, OpenAI, Gemini —
-            твой ключ, твой счёт. Локальный кеш, полная редакция секретов перед отправкой.
-            Open-source, MIT.
+            Один Go-бинарник. Три AI-провайдера: Claude, OpenAI, Gemini — твой ключ, твой счёт.
+            Запоминает что узнал о сервере между сессиями. Никогда не запускает sudo без твоего ведома. Open-source, MIT.
           </p>
         </Reveal>
 
@@ -197,7 +197,7 @@ function Hero() {
 
         <Reveal delay={0.25}>
           <div className="mt-6 text-center text-xs text-zinc-500">
-            Бесплатно · MIT-лицензия · macOS / Linux / Windows · работает с любым языком и тулом
+            Бесплатно · MIT-лицензия · macOS / Linux / Windows · никаких хуков и обёрток
           </div>
         </Reveal>
 
@@ -281,28 +281,31 @@ function WhyName() {
 
         <Reveal delay={0.1}>
           <p className="mt-6 text-zinc-400 leading-relaxed md:text-lg">
-            Это первое, что ты пишешь, когда в терминале что-то непонятное —
-            упавшая команда, длинный статус сервиса, дамп конфига, незнакомый JSON.
-            Раньше — копировал в Google или ChatGPT, тратил минуты.
-            Теперь — просто <code className="font-mono text-amber-300">wtf</code>.
+            Это первое, что ты пишешь, когда сервер начинает странно себя вести —
+            nginx не стартует, диск заполнен непонятно чем, что-то жрёт CPU.
+            Раньше — копировал ошибки в ChatGPT, гуглил команды, выполнял по одной.
+            Теперь — пишешь <code className="font-mono text-amber-300">wtf nginx не стартует</code>{' '}
+            и смотришь как агент сам всё разруливает.
           </p>
         </Reveal>
 
         <Reveal delay={0.15}>
           <p className="mt-4 text-zinc-400 leading-relaxed md:text-lg">
-            Утилита читает последний вывод терминала (stdout + stderr), добавляет контекст
-            (ОС, shell, package manager, git branch), вычищает секреты и спрашивает у AI.
-            На выходе — короткое объяснение того, что произошло, и при необходимости
-            2-3 готовых действия.
+            Агент видит твой вопрос, выполняет на машине безопасные read-only команды
+            (<code className="font-mono text-amber-300">systemctl status</code>,{' '}
+            <code className="font-mono text-amber-300">journalctl</code>,{' '}
+            <code className="font-mono text-amber-300">cat /etc/...</code>),
+            читает их вывод, итеративно докапывается до причины. Когда нужно что-то поменять —
+            показывает точную команду чтобы ты выполнил сам. <span className="text-amber-300">sudo никогда не запускается без твоего ведома.</span>
           </p>
         </Reveal>
 
         <Reveal delay={0.2}>
           <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { sym: 'sec', label: 'Секунды', desc: 'От команды до объяснения — две-три секунды. Без копипастов в браузер.' },
-              { sym: 'any', label: 'Любой вывод', desc: 'stack traces, status сервисов, конфиги, JSON, логи — всё что попадает в твой терминал.' },
-              { sym: 'safe', label: 'Без утечек', desc: 'Перед отправкой regex-фильтр чистит токены, JWT, пароли, email и абсолютные пути.' },
+              { sym: 'agent', label: 'Сам диагностирует', desc: 'До 15 раундов: запускает команды, читает выводы, делает выводы. Юзер только смотрит.' },
+              { sym: 'memo', label: 'Помнит контекст', desc: 'Между сессиями запоминает что узнал о машине — версии, пути, особенности. Не диагностирует с нуля каждый раз.' },
+              { sym: 'safe', label: 'Безопасный', desc: 'Whitelist read-only команд для авто-запуска. sudo, rm, restart — только показывает, не делает сам.' },
             ].map((v) => (
               <div
                 key={v.sym}
@@ -346,38 +349,38 @@ function Features() {
   const features = [
     {
       icon: Brain,
-      title: 'Три провайдера на выбор',
-      description: 'Claude (Anthropic), GPT-4o (OpenAI), Gemini (Google). Переключение одной командой. Твой ключ, твой счёт — мы ничего не проксируем.',
-    },
-    {
-      icon: Terminal,
-      title: 'Любой shell',
-      description: 'bash, zsh, fish, PowerShell. wtf init ставит хук — после этого захват последнего вывода идёт автоматически.',
-    },
-    {
-      icon: Zap,
-      title: 'Спиннер и красивый вывод',
-      description: 'Ответ рендерится прямо в терминале как Markdown — заголовки, инлайн-код, выделенные команды для копирования.',
+      title: 'Tool-use агент',
+      description: 'Модель сама решает какие команды запустить, читает их вывод, итерирует. До 15 раундов диагностики на сессию. Tool-use API всех трёх провайдеров — никакого хрупкого парсинга текста.',
     },
     {
       icon: ShieldCheck,
-      title: 'Чистка секретов',
-      description: '13 regex-правил: токены sk-/ghp_/AIza/xox*, JWT, Bearer, AWS-ключи, password=…, basic-auth URL, email. $HOME → ~. На первом запуске — явный consent-баннер.',
+      title: 'Safe-by-default',
+      description: 'Встроенный classifier разделяет команды на read-only (выполняем сами) и destructive (показываем юзеру). sudo, rm, restart, install никогда не запускаются автоматически.',
     },
     {
-      icon: Layers,
-      title: 'Локальный кеш',
-      description: 'SHA-256 по нормализованному выводу + provider + язык. Тот же вывод второй раз — мгновенный ответ без обращения к API.',
-    },
-    {
-      icon: Lock,
-      title: 'Zero trust',
-      description: 'Ни бэкенда, ни аккаунтов, ни телеметрии. Конфиг и кеш в ~/.wtf/ (mode 0600). Только исходящие HTTPS на API провайдера.',
+      icon: History,
+      title: 'Память между сессиями',
+      description: 'После каждой проблемы агент сохраняет ключевые факты: версии сервисов, пути конфигов, найденные решения. В следующий раз уже знает контекст — не диагностирует с нуля.',
     },
     {
       icon: Cpu,
-      title: 'Один бинарь',
-      description: 'Go, ~8 МБ, без зависимостей. brew, curl | sh, или скачай release для своей платформы.',
+      title: 'Три провайдера',
+      description: 'Claude (Anthropic), OpenAI, Gemini. Все три используют tool-use API. Переключение одной командой. Твой ключ, твой счёт — ничего не проксируется.',
+    },
+    {
+      icon: Lock,
+      title: 'Чистка секретов',
+      description: '13 regex-правил перед отправкой в API и перед записью в память: токены sk-/ghp_/AIza/xox*, JWT, Bearer, AWS-ключи, password=, basic-auth URL, email. $HOME → ~.',
+    },
+    {
+      icon: Zap,
+      title: 'Quiet UI с timestamps',
+      description: 'Каждая строка с временем [HH:MM:SS], спиннер во время выполнения, итог одной строкой. Полный вывод доступен через wtf -v. Auto-retry при rate-limit от провайдера.',
+    },
+    {
+      icon: Terminal,
+      title: 'Никаких хуков',
+      description: 'Не правит .bashrc, не подменяет шелл, не оборачивает команды. Просто бинарь — пишешь wtf <вопрос>, получаешь ответ. Работает в любом терминале.',
     },
     {
       icon: Globe,
@@ -387,7 +390,7 @@ function Features() {
     {
       icon: KeyRound,
       title: 'Свой ключ AI',
-      description: 'wtf config — интерактивный wizard. Ключи лежат локально в ~/.wtf/config.json. Можно через env: ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY.',
+      description: 'wtf config — интерактивный wizard. Ключи лежат локально в ~/.wtf/config.json (mode 0600). Можно через env: ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY.',
     },
   ];
 
@@ -427,17 +430,12 @@ function HowItWorks() {
     {
       num: '02',
       title: 'Настрой провайдера',
-      description: 'wtf config — wizard с тремя секциями (Claude / OpenAI / Gemini). Введи ключ хотя бы для одного. Ключи лежат локально в ~/.wtf/config.json.',
+      description: 'wtf config — wizard с Claude / OpenAI / Gemini. Введи ключ хотя бы для одного. Ключи лежат локально в ~/.wtf/config.json (mode 0600).',
     },
     {
       num: '03',
-      title: 'Поставь shell-хук',
-      description: 'wtf init — добавит небольшой preexec/precmd-хук в .zshrc / .bashrc / fish config / PowerShell profile. Перезапусти shell.',
-    },
-    {
-      num: '04',
-      title: 'Упади и пиши wtf',
-      description: 'После любой упавшей команды просто wtf — за пару секунд получишь объяснение и 2-3 варианта фикса.',
+      title: 'Опиши проблему — wtf разруливает',
+      description: 'wtf nginx не стартует. Агент сам выполнит диагностические команды, прочитает их вывод, найдёт причину и покажет решение. sudo показывает чтобы ты выполнил сам.',
     },
   ];
 
@@ -448,13 +446,13 @@ function HowItWorks() {
           <div className="text-center max-w-2xl mx-auto">
             <SectionDivider symbol=">_" label="The Flow" />
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
-              Четыре шага до первого фикса
+              Три шага до работающего сервера
             </h2>
           </div>
         </Reveal>
 
-        <div className="mt-14 grid grid-cols-1 md:grid-cols-4 gap-5 md:gap-8 relative">
-          <div className="hidden md:block absolute top-9 left-[12%] right-[12%] h-px bg-gradient-to-r from-transparent via-zinc-800 to-transparent" />
+        <div className="mt-14 grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-8 relative">
+          <div className="hidden md:block absolute top-9 left-[16%] right-[16%] h-px bg-gradient-to-r from-transparent via-zinc-800 to-transparent" />
           {steps.map((s, i) => (
             <Reveal key={s.num} delay={i * 0.06}>
               <div className="relative">
@@ -476,8 +474,8 @@ function HowItWorks() {
           <div id="install" className="mt-14 max-w-2xl mx-auto">
             <InstallCommand />
             <p className="mt-3 text-center text-xs text-zinc-500">
-              После установки доступны команды:{' '}
-              <code className="text-zinc-400">wtf · wtf init · wtf config · wtf --rerun · wtf --explain "..."</code>
+              После установки:{' '}
+              <code className="text-zinc-400">wtf &lt;вопрос&gt; · wtf config · wtf memory show · wtf -v</code>
             </p>
           </div>
         </Reveal>
@@ -497,15 +495,18 @@ function DemoSection() {
         <Reveal>
           <SectionDivider symbol="$_" label="The Output" />
           <h2 className="text-3xl md:text-4xl font-semibold tracking-tight leading-tight">
-            Как выглядит ответ
+            Как выглядит работа агента
           </h2>
           <p className="mt-4 text-zinc-400 leading-relaxed">
-            Одно предложение про то, что произошло или что показывает вывод. Если есть что
-            делать — 2-3 готовые команды для копирования. Опционально — короткое «почему»
-            и одна ссылка на доку, если она реально есть. Без воды и переливания из пустого.
+            Каждая строка с временем <code className="font-mono text-amber-300">[HH:MM:SS]</code>:
+            спиннер во время выполнения команды, итог одной строкой после.
+            Команды требующие <code className="font-mono text-amber-300">sudo</code>{' '}
+            или меняющие систему помечаются <span className="text-amber-300">⚠</span> и
+            показываются для ручного выполнения. В конце — ★ финальный ответ с решением.
           </p>
           <p className="mt-3 text-zinc-500 leading-relaxed text-sm">
-            На повторных одинаковых запросах срабатывает локальный кеш и ответ приходит мгновенно.
+            Полный вывод диагностических команд скрыт по умолчанию (флаг <code className="font-mono text-zinc-400">-v</code> для verbose).
+            При ошибке команды — последние 5 строк показываются автоматически.
           </p>
         </Reveal>
       </div>
@@ -516,12 +517,16 @@ function DemoSection() {
 function FAQ() {
   const items = [
     {
-      q: 'Как wtf вообще читает, что у меня было в терминале?',
-      a: 'Через shell-хук: wtf init добавляет небольшой preexec/precmd-хук в .zshrc / .bashrc / fish config / PowerShell profile. Хук пишет последнюю команду и её exit-код в ~/.wtf/last_meta. При вызове wtf утилита читает этот файл и отправляет вывод в AI — независимо от того, упало оно или просто хочется разобраться. Если хука нет или вывод пустой — wtf может перезапустить последнюю команду (--rerun) и поймать stdout/stderr. Также можно явно: wtf --explain "<любой текст>".',
+      q: 'Как wtf понимает что у меня сломалось?',
+      a: 'Ты словами описываешь проблему: wtf nginx не стартует. Агент собирает контекст (ОС, shell, cwd, package manager, git, плюс свою память о машине из прошлых сессий) и сам выполняет диагностические команды через tool-use API: systemctl status, journalctl, nginx -t, ls, cat — что нужно. Читает их вывод, итерирует, докапывается до причины. До 15 раундов на одну сессию. Никаких shell-хуков, обёрток, /tmp-файлов — обычный бинарь.',
     },
     {
-      q: 'Это работает только с ошибками?',
-      a: 'Нет. wtf берёт последний вывод терминала независимо от exit-кода. Хочешь разобраться, что показывает systemctl status nginx или что внутри длинного JSON от curl — пиши wtf, объяснит. Для упавших команд дополнительно идут 2-3 варианта починить.',
+      q: 'Какие команды агент может запускать сам?',
+      a: 'Только read-only из встроенного whitelist: ls, cat, tail, grep, ps, df, ip, ss, lsof, systemctl status, journalctl, docker ps, docker logs, git status, git log, nginx -t, apt list, dpkg -l, и т.п. (~80 утилит). Любая destructive команда — sudo, rm, mv, dd, chmod, chown, restart, install, push, force, опасные паттерны (cmd | sh, > /etc/...) — блокируется и показывается юзеру для ручного выполнения. Никогда не запускается автоматически.',
+    },
+    {
+      q: 'Что значит "память между сессиями"?',
+      a: 'После каждой решённой проблемы агент сохраняет короткие заметки 4 типов: machine_fact (стабильные факты — ОС, версии), service_state (состояние сервисов, домены), user_preference (привычки), resolved_issue (что чинили). В ~/.wtf/memory/store.json. При следующем wtf эти заметки идут в system-промпт — агент сразу знает контекст. Раз в 20 сессий запускается консолидация: AI сжимает старые заметки в 30-50 самых ценных.',
     },
     {
       q: 'Это правда полностью open-source? Никаких подписок?',
@@ -529,31 +534,35 @@ function FAQ() {
     },
     {
       q: 'Какой провайдер лучше выбрать?',
-      a: 'По умолчанию — Claude Haiku 4.5: быстро, дёшево, качественно для коротких объяснений. OpenAI gpt-4o-mini — сравним. Gemini 2.0 Flash — самый дешёвый и быстрый. wtf config позволяет переключаться, wtf --provider <name> — разово.',
+      a: 'Все три используют tool-use API. Claude Haiku 4.5 — быстро и дёшево. Sonnet 4.6 — медленнее но умнее, лучше для сложной диагностики. OpenAI gpt-4o-mini — сравним с Haiku. Gemini 2.0 Flash — самый дешёвый и с большими лимитами на токены/мин (плюс при долгих сессиях). wtf config позволяет переключаться, wtf --provider <name> — разово.',
     },
     {
-      q: 'А мои секреты не утекут? Там же могут быть токены в логах.',
-      a: 'Перед отправкой работает 13 regex-правил: sk-ant-…, sk-…, AIza…, gh*_…, xox*-, JWT (eyJ…), Bearer …, AKIA…, aws_secret=…, private keys (-----BEGIN…), password/secret/token=…, basic-auth URL (user:pass@host), email. Плюс $HOME → ~. На первом запуске показывается баннер с тем, что именно уйдёт в API, и это сохраняется в конфиге как «согласие получено».',
+      q: 'А мои секреты не утекут? Я работаю с чувствительными конфигами.',
+      a: 'Перед отправкой в API и перед записью в память работают 13 regex-правил: sk-ant-, sk-, AIza, gh*_, xox*-, JWT (eyJ.eyJ.), Bearer, AKIA, aws_secret=, private keys, password/secret/token=, basic-auth URL, email. Плюс $HOME → ~. И в память пишется только то что AI явно пометил для запоминания (через notes в finish), не весь stdout команд.',
     },
     {
-      q: 'Что если я хочу видеть, что отправляется?',
-      a: 'wtf при первом вызове показывает консент-баннер с полным списком метаданных (OS, shell, cwd, git branch, package manager, команда, exit code, размер вывода, какие классы секретов вычистились). Дальше можно посмотреть последний отправленный запрос в ~/.wtf/cache/<hash>.json — там лежит сохранённый ответ.',
+      q: 'А если упрусь в rate-limit провайдера?',
+      a: 'Между раундами автопауза 800мс — снижает шанс схватить 429. Если всё же схватили — auto-retry до 3 раз с задержкой из заголовка Retry-After / x-ratelimit-reset (или парс "try again in 6.7s" из текста). Если ждать > 30 сек — отказываемся, показываем ошибку. UI пишет: rate limit · повтор через 6.7s (попытка 2/4).',
     },
     {
-      q: 'Безопасно ли запускать curl | sudo bash?',
+      q: 'Безопасно ли запускать curl | sudo bash для установки?',
       a: 'Скрипт короткий, читай его перед запуском: github.com/kitay-sudo/wtf/blob/main/install.sh. Он только определяет архитектуру, скачивает бинарь из GitHub Releases и кладёт в /usr/local/bin/wtf. Никаких внешних серверов кроме github.com.',
     },
     {
       q: 'Можно ли работать офлайн?',
-      a: 'Не полностью. AI-провайдеры все в облаке. Но ответы кешируются по хешу вывода в ~/.wtf/cache/, так что повторные одинаковые запросы возвращаются мгновенно из кеша без сети. Self-hosted режим через ollama в roadmap.',
-    },
-    {
-      q: 'Сколько это в RAM/диск?',
-      a: 'Бинарь ~8 МБ. RAM при вызове <20 МБ, между вызовами — 0 (это не демон, это разовый запуск). Конфиг ~1 КБ, кеш растёт по 2-5 КБ на ответ, чистится автоматически через 30 дней.',
+      a: 'Нет — AI-провайдеры все в облаке, и для tool-use агента кеш не работает (каждая сессия — новая последовательность команд). Self-hosted режим через ollama в roadmap.',
     },
     {
       q: 'А если я в Windows?',
-      a: 'Работает через PowerShell (Windows PowerShell 5.1 и pwsh 7+). wtf init установит хук в $PROFILE. Поддерживается также через Git Bash / WSL — там работает unix-хук.',
+      a: 'Работает через PowerShell (Windows PowerShell 5.1 и pwsh 7+) — команды агент запускает через cmd.exe / pwsh. На Linux/macOS — через /bin/sh. Также работает через Git Bash / WSL.',
+    },
+    {
+      q: 'Можно прервать диагностику?',
+      a: 'Да, Ctrl+C — graceful shutdown. Агент завершит текущий HTTP-запрос, сохранит память что успел собрать, и выйдет с кодом 130 (стандарт SIGINT).',
+    },
+    {
+      q: 'Что если я хочу увидеть полный вывод команд?',
+      a: 'По умолчанию вывод скрыт — каждая команда сворачивается в одну строку с временем, статусом, размером. Запусти с флагом -v или --verbose — увидишь полный вывод каждой команды. При exit≠0 в обычном режиме автоматически показываются последние 5 строк.',
     },
   ];
 
@@ -593,13 +602,13 @@ function CTA() {
             <WtfMark size={56} />
           </div>
           <h2 className="text-3xl md:text-5xl font-semibold tracking-tight leading-tight">
-            Перестань копировать вывод в Google.<br />
+            Перестань гуглить команды для починки.<br />
             <span className="bg-gradient-to-r from-amber-400 to-yellow-300 bg-clip-text text-transparent">
-              Просто пиши wtf.
+              Опиши проблему — wtf разрулит.
             </span>
           </h2>
           <p className="mt-5 text-zinc-400 max-w-xl mx-auto">
-            60 секунд от установки до первого объяснения. Один бинарь, твой ключ, никаких подписок.
+            60 секунд от установки до первой решённой проблемы. Один бинарь, твой ключ AI, никаких подписок.
           </p>
 
           <div className="mt-8 max-w-2xl mx-auto">
@@ -625,16 +634,30 @@ function CTA() {
 
 const CHANGELOG = [
   {
+    version: '0.2.0',
+    date: '2026-05-01',
+    title: 'Терминальный sysadmin-агент',
+    highlights: [
+      'Полностью новая концепция: пишешь wtf <вопрос словами> — агент сам разруливает',
+      'Tool-use API всех трёх провайдеров (Claude / OpenAI / Gemini): надёжный парсинг вызовов',
+      'Exec-classifier: 80+ безопасных read-only утилит для авто-запуска, blacklist destructive',
+      'Память между сессиями: ~/.wtf/memory/store.json с TTL и AI-консолидацией раз в 20 сессий',
+      'Auto-retry при 429: парс Retry-After / x-ratelimit-reset, до 3 попыток',
+      'Quiet UI: каждая строка с [HH:MM:SS], спиннер в позиции иконки результата',
+      'Throttle 800мс между AI-раундами + trim истории (4 последних tool_result)',
+      'Graceful Ctrl+C: память сохраняется при прерывании',
+      'Удалены: shell-хуки (wtf init, wtfc), кэш, --rerun, --explain — больше не нужны',
+    ],
+  },
+  {
     version: '0.1.0',
     date: '2026-04-30',
     title: 'Первый публичный релиз',
     highlights: [
       'CLI на Go: один кросс-платформенный бинарник',
       'Три провайдера на выбор: Claude, OpenAI, Gemini',
-      'Shell-хук для bash / zsh / fish / PowerShell + fallback через --rerun',
-      'Локальный кеш с TTL 30 дней',
-      'Чистка секретов: 13 regex-правил, consent-баннер при первом запуске',
-      'Spinner в стиле Claude CLI, цветной Markdown-рендер ответа',
+      'Объяснение последнего вывода терминала через shell-хук',
+      'Локальный кеш с TTL 30 дней, чистка секретов (13 regex-правил)',
     ],
   },
 ];

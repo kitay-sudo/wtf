@@ -2,143 +2,261 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import Spinner from '../Spinner';
 
-// Сценарий: команда падает → юзер пишет wtf → бегущая последовательность статусов
-// (читает stderr, собирает контекст, чистит секреты, шлёт в API, ждёт, парсит) →
-// готовый Markdown-ответ. Похоже на то, что делает реальная утилита.
+// Сценарий: юзер пишет wtf <вопрос> словами → агент через tool-use API
+// сам выполняет read-only команды → находит причину → показывает destructive
+// команду для ручного выполнения → ★ финальный ответ.
+//
+// Имитирует реальный quiet-режим wtf v2: каждая строка [HH:MM:SS], спиннер
+// in-place во время выполнения команды, итог одной строкой после.
 //
 // Типы шагов:
-//   cmd     — пользовательская команда
-//   err     — строка из stderr (красная)
-//   spin    — статус-строка со спиннером, ЗАМЕНЯЕТСЯ при следующем 'spin' (in-place)
-//   ok      — финальный успех (зелёная-жёлтая галка), снимает спиннер
-//   blank   — пустая строка
-//   ans-h   — заголовок секции ответа
-//   ans     — текст ответа
-//   code    — код-строка (отступ + цвет)
-//   log     — нейтральный комментарий (серый, курсив)
-//   pause   — пауза N мс (не выводится)
+//   user-cmd  — пользовательская команда в шелле (зелёная)
+//   spin      — спиннер с reason+command (заменяется при следующем spin/done)
+//   done      — закрытие спиннера (✓ или ✗) — зашёл в history
+//   warn      — ⚠ destructive команда для юзера
+//   warn-sub  — под-строка warn (с отступом)
+//   final-h   — ★ ответ:
+//   final     — текст финального ответа
+//   blank     — пустая строка
+//   pause     — пауза N мс
 
 const session = [
-  { t: 'cmd', text: '$ npm run build' },
-  { t: 'err', text: '> wtf-frontend@0.1.0 build' },
-  { t: 'err', text: '> vite build' },
-  { t: 'err', text: '' },
-  { t: 'err', text: 'error during build:' },
-  { t: 'err', text: "Error: Cannot find module './pages/Landing' imported from src/App.jsx" },
-  { t: 'err', text: '    at finalizeResolution (node:internal/modules/esm/resolve:265)' },
-  { t: 'pause', ms: 1000 },
-
-  { t: 'cmd', text: '$ wtf' },
-  { t: 'spin', en: 'Reading stderr...',                  ru: 'Читаю stderr...' },
-  { t: 'pause', ms: 350 },
-  { t: 'spin', en: 'Collecting context (OS, shell, git)...', ru: 'Собираю контекст (OS, shell, git)...' },
-  { t: 'pause', ms: 400 },
-  { t: 'spin', en: 'Redacting secrets...',                ru: 'Чищу секреты (regex × 13)...' },
-  { t: 'pause', ms: 350 },
-  { t: 'spin', en: 'Calling claude (haiku-4-5)...',       ru: 'Запрос в claude (haiku-4-5)...' },
-  { t: 'pause', ms: 700 },
-  { t: 'spin', en: 'Receiving stream...',                 ru: 'Получаю ответ...' },
-  { t: 'pause', ms: 500 },
-  { t: 'ok',   en: 'Done · 1.2s · cached for 30 days',    ru: 'Готово · 1.2с · сохранено в кеш на 30 дней' },
-  { t: 'blank' },
-
-  { t: 'ans-h', en: 'What happened:', ru: 'Что случилось:' },
-  {
-    t: 'ans',
-    en: 'Vite cannot find src/pages/Landing.jsx — import path does not match the file.',
-    ru: 'Vite не находит src/pages/Landing.jsx — путь импорта не совпадает с реальным.',
-  },
-  { t: 'blank' },
-  { t: 'ans-h', en: 'Fix:', ru: 'Как починить:' },
-  { t: 'ans', en: '1) Check the file exists:', ru: '1) Проверь, что файл существует:' },
-  { t: 'code', text: '   ls src/pages/Landing.jsx' },
-  { t: 'ans', en: '2) Vite needs the .jsx extension explicitly:', ru: '2) Vite требует расширение .jsx явно:' },
-  { t: 'code', text: "   import Landing from './pages/Landing.jsx'" },
-  { t: 'ans', en: '3) Or set resolve.extensions in vite.config.js', ru: '3) Или добавь resolve.extensions в vite.config.js' },
-  { t: 'pause', ms: 1700 },
-
-  { t: 'cmd', text: '$ docker compose up' },
-  { t: 'err', text: 'Error response from daemon: bind: address already in use' },
-  { t: 'err', text: 'Error: failed to start container "web": port 5432 is allocated' },
-  { t: 'pause', ms: 800 },
-
-  { t: 'cmd', text: '$ wtf' },
-  { t: 'spin', en: 'Reading stderr...',           ru: 'Читаю stderr...' },
-  { t: 'pause', ms: 300 },
-  { t: 'spin', en: 'Cache hit — returning instantly', ru: 'Найдено в кеше — отвечаю мгновенно' },
-  { t: 'pause', ms: 400 },
-  { t: 'ok',   en: 'Done · 0.04s · from cache',   ru: 'Готово · 0.04с · из кеша' },
-  { t: 'blank' },
-
-  { t: 'ans-h', en: 'What happened:', ru: 'Что случилось:' },
-  {
-    t: 'ans',
-    en: 'Port 5432 is busy — system Postgres is still running.',
-    ru: 'Порт 5432 занят — старая Postgres всё ещё запущена.',
-  },
-  { t: 'blank' },
-  { t: 'ans-h', en: 'Fix:', ru: 'Как починить:' },
-  { t: 'ans', en: '1) Find who holds the port:', ru: '1) Кто держит порт:' },
-  { t: 'code', text: '   sudo lsof -iTCP:5432 -sTCP:LISTEN' },
-  { t: 'ans', en: '2) Stop system postgres:', ru: '2) Остановить системный postgres:' },
-  { t: 'code', text: '   sudo systemctl stop postgresql' },
-  { t: 'ans', en: '3) Or change the port in docker-compose.yml: 5433:5432', ru: '3) Или поменять порт: 5433:5432' },
-  { t: 'pause', ms: 1800 },
-
-  { t: 'cmd', text: '$ git push origin main' },
-  { t: 'err', text: '! [rejected]        main -> main (non-fast-forward)' },
-  { t: 'err', text: 'error: failed to push some refs' },
-  { t: 'pause', ms: 700 },
-
-  { t: 'cmd', text: '$ wtf' },
-  { t: 'spin', en: 'Reading stderr...',                  ru: 'Читаю stderr...' },
-  { t: 'pause', ms: 280 },
-  { t: 'spin', en: 'Calling claude...',                  ru: 'Запрос в claude...' },
+  { t: 'user-cmd', text: 'wtf nginx не стартует' },
   { t: 'pause', ms: 600 },
-  { t: 'ok',   en: 'Done · 0.9s',                        ru: 'Готово · 0.9с' },
-  { t: 'blank' },
 
-  { t: 'ans-h', en: 'What happened:', ru: 'Что случилось:' },
   {
-    t: 'ans',
-    en: 'Remote has commits you do not have locally — fast-forward not possible.',
-    ru: 'На удалённой ветке есть коммиты, которых нет локально — fast-forward невозможен.',
+    t: 'spin',
+    time: '03:55:40',
+    en: 'Checking service status · systemctl status nginx -l',
+    ru: 'Проверяю текущий статус сервиса · systemctl status nginx -l',
+  },
+  { t: 'pause', ms: 1100 },
+  {
+    t: 'done',
+    ok: true,
+    time: '03:55:40',
+    en: 'Checking service status · systemctl status nginx -l · 17ms · 934B',
+    ru: 'Проверяю текущий статус сервиса · systemctl status nginx -l · 17ms · 934B',
+  },
+
+  {
+    t: 'spin',
+    time: '03:55:41',
+    en: 'Checking nginx config syntax · nginx -t',
+    ru: 'Проверяю синтаксис конфигурации nginx · nginx -t',
+  },
+  { t: 'pause', ms: 900 },
+  {
+    t: 'done',
+    ok: false,
+    time: '03:55:41',
+    en: 'Checking nginx config syntax · nginx -t · 12ms · exit=1 · 547B',
+    ru: 'Проверяю синтаксис конфигурации nginx · nginx -t · 12ms · exit=1 · 547B',
+  },
+  {
+    t: 'done-sub',
+    en: '│ nginx: [emerg] cannot load certificate "/etc/letsencrypt/live/example.com/fullchain.pem"',
+    ru: '│ nginx: [emerg] cannot load certificate "/etc/letsencrypt/live/example.com/fullchain.pem"',
+  },
+  {
+    t: 'done-sub',
+    en: '│ nginx: configuration file /etc/nginx/nginx.conf test failed',
+    ru: '│ nginx: configuration file /etc/nginx/nginx.conf test failed',
+  },
+
+  {
+    t: 'spin',
+    time: '03:55:43',
+    en: 'Checking certificate permissions · ls -ld /etc/letsencrypt/live',
+    ru: 'Проверяю права на сертификаты · ls -ld /etc/letsencrypt/live',
+  },
+  { t: 'pause', ms: 800 },
+  {
+    t: 'done',
+    ok: true,
+    time: '03:55:43',
+    en: 'Checking certificate permissions · ls -ld /etc/letsencrypt/live · 5ms · 78B',
+    ru: 'Проверяю права на сертификаты · ls -ld /etc/letsencrypt/live · 5ms · 78B',
+  },
+
+  {
+    t: 'spin',
+    time: '03:55:45',
+    en: 'Checking under what user master nginx is running · ps aux | grep nginx',
+    ru: 'Под каким юзером запущен master nginx · ps aux | grep nginx',
+  },
+  { t: 'pause', ms: 700 },
+  {
+    t: 'done',
+    ok: true,
+    time: '03:55:45',
+    en: 'Checking under what user master nginx is running · ps aux | grep nginx · 36ms · 249B',
+    ru: 'Под каким юзером запущен master nginx · ps aux | grep nginx · 36ms · 249B',
+  },
+
+  { t: 'pause', ms: 600 },
+  {
+    t: 'warn',
+    time: '03:55:55',
+    en: 'run yourself (requires sudo / changes the system):',
+    ru: 'выполни сам (требует sudo / меняет систему):',
+  },
+  {
+    t: 'warn-sub',
+    en: 'Set proper permissions on the cert directory so root nginx can read it.',
+    ru: 'Установи права на директорию с сертификатом — nginx (root) сможет читать.',
+  },
+  {
+    t: 'warn-cmd',
+    text: '$ sudo chmod 750 /etc/letsencrypt/live && sudo systemctl restart nginx',
+  },
+  { t: 'pause', ms: 1400 },
+
+  {
+    t: 'final-h',
+    time: '03:55:56',
+    en: 'answer:',
+    ru: 'ответ:',
   },
   { t: 'blank' },
-  { t: 'ans-h', en: 'Fix:', ru: 'Как починить:' },
-  { t: 'ans', en: '1) Safe — rebase on top of remote:', ru: '1) Безопасно — rebase на удалённый main:' },
-  { t: 'code', text: '   git pull --rebase origin main && git push' },
-  { t: 'ans', en: '2) If you know what you are doing — force-with-lease:', ru: '2) Если знаешь что делаешь — force-with-lease:' },
-  { t: 'code', text: '   git push --force-with-lease' },
-  { t: 'pause', ms: 2200 },
+  {
+    t: 'final',
+    en: 'nginx cannot start because the master process (running as root) does not',
+    ru: 'nginx не стартует — мастер-процесс (root) не может прочитать SSL-сертификат',
+  },
+  {
+    t: 'final',
+    en: 'have read access to /etc/letsencrypt/live/example.com/fullchain.pem.',
+    ru: '/etc/letsencrypt/live/example.com/fullchain.pem из-за прав на родительскую',
+  },
+  {
+    t: 'final',
+    en: 'The directory /etc/letsencrypt/live has mode 700 instead of 750.',
+    ru: 'директорию /etc/letsencrypt/live (700 вместо 750).',
+  },
+  { t: 'blank' },
+  {
+    t: 'final',
+    en: 'Run the command above — it fixes the permissions and restarts nginx.',
+    ru: 'Выполни команду выше — она исправит права и перезапустит nginx.',
+  },
+  { t: 'pause', ms: 2800 },
 
-  { t: 'log', en: '— wtf is watching. fail any command, then `wtf`.', ru: '— wtf наготове. упади любой командой, потом `wtf`.' },
+  {
+    t: 'log',
+    en: '— wtf is on call. describe the problem, agent does the rest.',
+    ru: '— wtf на связи. опиши проблему — агент сам разберётся.',
+  },
 ];
 
 const TYPE_DELAY_FIRST = 500;
-const TYPE_DELAY = 220;
-const MAX_LINES = 18;
+const TYPE_DELAY = 200;
+const MAX_LINES = 22;
 
-const lineClass = (t) =>
-  t === 'cmd' ? 'text-zinc-100'
-    : t === 'ok' ? 'text-amber-400'
-    : t === 'err' ? 'text-red-400/90'
-    : t === 'spin' ? 'text-amber-300'
-    : t === 'ans-h' ? 'text-amber-400 font-semibold'
-    : t === 'ans' ? 'text-zinc-200'
-    : t === 'code' ? 'text-amber-300/90 font-medium'
-    : t === 'log' ? 'text-zinc-500 italic'
-    : 'text-zinc-500';
+const lineClass = (t) => {
+  switch (t) {
+    case 'user-cmd':
+      return 'text-zinc-100';
+    case 'spin':
+      return 'text-amber-300';
+    case 'done':
+      return 'text-amber-400';
+    case 'done-sub':
+      return 'text-zinc-500';
+    case 'warn':
+      return 'text-amber-300';
+    case 'warn-sub':
+      return 'text-zinc-400';
+    case 'warn-cmd':
+      return 'text-amber-300/90 font-medium';
+    case 'final-h':
+      return 'text-amber-400 font-semibold';
+    case 'final':
+      return 'text-zinc-200';
+    case 'log':
+      return 'text-zinc-500 italic';
+    default:
+      return 'text-zinc-500';
+  }
+};
 
 const resolveText = (step, lang) => {
   if (step.t === 'blank') return ' ';
   return step.text ?? step[lang] ?? step.en;
 };
 
+// renderLine — стилизация одной строки. Префикс [HH:MM:SS] + иконка + текст,
+// 14-символьный отступ для under-строк (как в реальном wtf).
+function renderLine({ step, lang }) {
+  const text = resolveText(step, lang);
+
+  if (step.t === 'user-cmd') {
+    return (
+      <>
+        <span className="text-amber-400">admingod@srv:~$ </span>
+        <span>{text}</span>
+      </>
+    );
+  }
+
+  if (step.t === 'done') {
+    const icon = step.ok ? '✓' : '✗';
+    const iconColor = step.ok ? 'text-amber-400' : 'text-red-400';
+    return (
+      <>
+        <span className="text-zinc-500">[{step.time}]</span>{' '}
+        <span className={iconColor}>{icon}</span> <span>{text}</span>
+      </>
+    );
+  }
+
+  if (step.t === 'done-sub') {
+    return <span className="ml-[6.5rem] text-zinc-500">{text}</span>;
+  }
+
+  if (step.t === 'warn') {
+    return (
+      <>
+        <span className="text-zinc-500">[{step.time}]</span>{' '}
+        <span className="text-amber-300">⚠</span>{' '}
+        <span className="text-amber-300">{text}</span>
+      </>
+    );
+  }
+
+  if (step.t === 'warn-sub') {
+    return <span className="ml-[6.5rem] text-zinc-400">{text}</span>;
+  }
+
+  if (step.t === 'warn-cmd') {
+    return <span className="ml-[6.5rem] text-amber-300/90">{text}</span>;
+  }
+
+  if (step.t === 'final-h') {
+    return (
+      <>
+        <span className="text-zinc-500">[{step.time}]</span>{' '}
+        <span className="text-amber-400">★</span>{' '}
+        <span className="text-amber-400 font-semibold">{text}</span>
+      </>
+    );
+  }
+
+  if (step.t === 'final') {
+    return <span className="ml-[6.5rem]">{text}</span>;
+  }
+
+  if (step.t === 'log') {
+    return <span>{text}</span>;
+  }
+
+  return <span>{text}</span>;
+}
+
 export default function TerminalDemo() {
   const [lang, setLang] = useState('ru');
   const [history, setHistory] = useState([]);
-  const [activeSpin, setActiveSpin] = useState(null); // {step, key} | null
+  const [activeSpin, setActiveSpin] = useState(null);
   const [idx, setIdx] = useState(0);
   const keyRef = useRef(0);
   const scrollRef = useRef(null);
@@ -155,15 +273,11 @@ export default function TerminalDemo() {
     const delay = idx === 0 ? TYPE_DELAY_FIRST : TYPE_DELAY;
     const id = setTimeout(() => {
       if (step.t === 'spin') {
-        // Спиннер — это ОДНА живая строка, которая обновляется in-place.
-        // Не уходит в history до тех пор, пока не закроется ok/err.
         setActiveSpin({ step, key: keyRef.current++ });
-      } else if (step.t === 'ok' || step.t === 'err') {
-        // Закрытие спиннера — снимаем активный, добавляем строку в history.
+      } else if (step.t === 'done') {
         setActiveSpin(null);
         setHistory((h) => trim([...h, { step, key: keyRef.current++ }]));
       } else {
-        // Обычная строка — без активного спиннера.
         setActiveSpin(null);
         setHistory((h) => trim([...h, { step, key: keyRef.current++ }]));
       }
@@ -182,7 +296,7 @@ export default function TerminalDemo() {
         <div className="w-3 h-3 rounded-full bg-zinc-700" />
         <div className="w-3 h-3 rounded-full bg-zinc-700" />
         <div className="w-3 h-3 rounded-full bg-zinc-700" />
-        <span className="ml-3 text-xs text-zinc-500 font-mono">~/projects/myapp</span>
+        <span className="ml-3 text-xs text-zinc-500 font-mono">admingod@srv:~</span>
         <div className="ml-auto flex items-center gap-1 text-[10px] font-mono">
           <button
             type="button"
@@ -207,7 +321,7 @@ export default function TerminalDemo() {
         </div>
       </div>
 
-      <div ref={scrollRef} className="p-5 font-mono text-xs md:text-sm leading-relaxed h-[360px] overflow-hidden">
+      <div ref={scrollRef} className="p-5 font-mono text-xs md:text-sm leading-relaxed h-[420px] overflow-hidden">
         {history.map(({ step, key }) => (
           <motion.div
             key={key}
@@ -216,7 +330,7 @@ export default function TerminalDemo() {
             transition={{ duration: 0.4, ease: 'easeOut' }}
             className={lineClass(step.t)}
           >
-            {resolveText(step, lang)}
+            {renderLine({ step, lang })}
           </motion.div>
         ))}
 
@@ -228,8 +342,9 @@ export default function TerminalDemo() {
             transition={{ duration: 0.2 }}
             className={lineClass('spin')}
           >
-            <Spinner className="mr-1.5 text-amber-400" />
-            {resolveText(activeSpin.step, lang)}
+            <span className="text-zinc-500">[{activeSpin.step.time}]</span>{' '}
+            <Spinner className="mr-1.5 text-amber-400 inline-block" />
+            <span>{resolveText(activeSpin.step, lang)}</span>
           </motion.div>
         )}
 
