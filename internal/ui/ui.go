@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 )
 
@@ -29,12 +30,50 @@ const (
 	white      = "\033[97m"
 )
 
+// indentWidth — длина общего префикса всех строк wtf:
+// "[HH:MM:SS] <icon>  " = 11 + 1 + 1 + 1 = 14 символов.
+const indentWidth = 14
+
+// minBodyWidth — минимальная ширина текстовой колонки даже на узких терминалах.
+const minBodyWidth = 30
+
+// Lipgloss-стили для блоков. Все цвета — 256-цветные коды, чтобы не зависеть
+// от темы терминала.
+var (
+	styleGray       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	styleYellow     = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+	styleYellowBold = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	styleCyan       = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
+	styleRed        = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	styleWhite      = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+)
+
 func IsTTY() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 func IsStderrTTY() bool {
 	return term.IsTerminal(int(os.Stderr.Fd()))
+}
+
+// TermWidth — ширина терминала в колонках. Если не получилось определить
+// (pipe/cron) — 80.
+func TermWidth() int {
+	for _, fd := range []int{int(os.Stderr.Fd()), int(os.Stdout.Fd())} {
+		if w, _, err := term.GetSize(fd); err == nil && w > 0 {
+			return w
+		}
+	}
+	return 80
+}
+
+// bodyWidth — ширина текстового блока с учётом 14-символьного префикса.
+func bodyWidth() int {
+	w := TermWidth() - indentWidth
+	if w < minBodyWidth {
+		w = minBodyWidth
+	}
+	return w
 }
 
 func colorize(c, s string) string {
@@ -62,13 +101,13 @@ func Section(title string) {
 	fmt.Fprintln(os.Stderr, colorize(gray, "  "+strings.Repeat("─", len(title))))
 }
 
-func Step(s string)    { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(cyan, "→"), s) }
-func OK(s string)      { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(yellowBold, "✓"), s) }
-func Info(s string)    { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(gray, "ⓘ"), colorize(gray, s)) }
-func Warn(s string)    { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(yellow, "⚠"), s) }
-func Err(s string)     { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(red, "✗"), s) }
-func KV(k, v string)   { fmt.Fprintf(os.Stderr, "    %s  %s\n", colorize(gray, padRight(k+":", 14)), v) }
-func Plain(s string)   { fmt.Fprintln(os.Stderr, s) }
+func Step(s string)     { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(cyan, "→"), s) }
+func OK(s string)       { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(yellowBold, "✓"), s) }
+func Info(s string)     { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(gray, "ⓘ"), colorize(gray, s)) }
+func Warn(s string)     { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(yellow, "⚠"), s) }
+func Err(s string)      { fmt.Fprintf(os.Stderr, "  %s  %s\n", colorize(red, "✗"), s) }
+func KV(k, v string)    { fmt.Fprintf(os.Stderr, "    %s  %s\n", colorize(gray, padRight(k+":", 14)), v) }
+func Plain(s string)    { fmt.Fprintln(os.Stderr, s) }
 func PlainOut(s string) { fmt.Fprintln(os.Stdout, s) }
 
 func padRight(s string, n int) string {
@@ -116,9 +155,6 @@ func (s *Spinner) Start() {
 				fmt.Fprint(os.Stderr, clearLine, visible)
 				return
 			case <-t.C:
-				// Тот же префикс [HH:MM:SS] что и в финальных строках, но
-				// иконка — это анимированный кадр спиннера. Получается
-				// идеальное вертикальное выравнивание со строкой результата.
 				frame := spinFrames[i%len(spinFrames)]
 				fmt.Fprintf(os.Stderr, "%s%s%s",
 					clearLine, linePrefix(frame, yellow), s.prefix)
@@ -132,10 +168,8 @@ func (s *Spinner) Update(prefix string) {
 	s.prefix = prefix
 }
 
-// StopOK останавливает спиннер. Если msg пустая — НИЧЕГО не печатает
-// (ни галочки, ни строки), только убирает текущую анимацию. Это нужно для
-// quiet-режима: после спиннера каллер сам печатает финальную строку через
-// CommandLineQuiet, и галочка от спиннера была бы лишним мусором.
+// StopOK останавливает спиннер. Если msg пустая — НИЧЕГО не печатает,
+// только убирает текущую анимацию.
 func (s *Spinner) StopOK(msg string) {
 	live := s.live.Load()
 	if live {
@@ -169,7 +203,7 @@ type Box struct {
 
 func (b Box) Render(w io.Writer) {
 	width := boxWidth(b)
-	top := "╭─ " + b.Title + " " + strings.Repeat("─", max(0, width-len(b.Title)-3)) + "╮"
+	top := "╭─ " + b.Title + " " + strings.Repeat("─", maxInt(0, width-len(b.Title)-3)) + "╮"
 	bot := "╰" + strings.Repeat("─", width) + "╯"
 	fmt.Fprintln(w, colorize(yellow, top))
 	for _, line := range b.Lines {
@@ -229,11 +263,8 @@ func Prompt(reader *bufio.Reader, label, def string) string {
 	return v
 }
 
-// Choice — выбор одного из вариантов.
 // ChoiceOrCustom — как Choice, но дополнительно позволяет ввести произвольное
-// имя варианта (для случаев "хочу новую модель которой ещё нет в списке").
-// Если ввод не совпал ни с цифрой, ни с именем из options — возвращаем
-// введённое значение как есть.
+// имя варианта.
 func ChoiceOrCustom(reader *bufio.Reader, label string, options []string, def string) string {
 	fmt.Fprintf(os.Stderr, "%s %s\n", colorize(yellow, "?"), label)
 	for i, o := range options {
@@ -258,14 +289,10 @@ func ChoiceOrCustom(reader *bufio.Reader, label string, options []string, def st
 			return o
 		}
 	}
-	return v // custom value
+	return v
 }
 
-// Choice — нумерованный выбор. Юзер вводит число (или имя варианта)
-// или жмёт Enter чтобы оставить значение по умолчанию. Дефолт помечается
-// "(по умолчанию)" в строке варианта — никаких стрелочек/курсоров,
-// потому что мы не реализуем raw-mode перехват клавиш и стрелки нажимать
-// бесполезно.
+// Choice — нумерованный выбор с дефолтом.
 func Choice(reader *bufio.Reader, label string, options []string, def string) string {
 	fmt.Fprintf(os.Stderr, "%s %s\n", colorize(yellow, "?"), label)
 	defaultIdx := -1
@@ -295,7 +322,7 @@ func Choice(reader *bufio.Reader, label string, options []string, def string) st
 	return def
 }
 
-func max(a, b int) int {
+func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}
@@ -303,14 +330,7 @@ func max(a, b int) int {
 }
 
 // linePrefix возвращает единый префикс для всех событий wtf:
-//
-//	"[HH:MM:SS] <icon>  "
-//
-// Все строки агента (команды, финал, предупреждения) должны начинаться с
-// этого префикса, чтобы вертикали выравнивались.
-//
-// Длина префикса фиксирована: 11 символов времени + 1 пробел + 1 знак icon
-// + 2 пробела = 15. Цвет применяется отдельно (в видимый размер не входит).
+// "[HH:MM:SS] <icon>  ". Длина 14 видимых символов (см. indentWidth).
 func linePrefix(icon string, iconColor string) string {
 	ts := time.Now().Format("15:04:05")
 	return fmt.Sprintf("%s %s ",
@@ -318,23 +338,115 @@ func linePrefix(icon string, iconColor string) string {
 		colorize(iconColor, icon))
 }
 
+// indentStr — пробельный отступ той же ширины что и linePrefix.
+func indentStr() string {
+	return strings.Repeat(" ", indentWidth)
+}
+
+// wrapBody переносит длинные строки по словам так, чтобы текст не выходил за
+// (ширина терминала - indentWidth). Сохраняет существующие переводы строк
+// (списки, абзацы) — только разбивает слишком длинные строки. Каждая строка
+// продолжения получает 14-пробельный отступ снаружи (через prefixLines),
+// здесь мы только обеспечиваем правильную ширину.
+func wrapBody(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+	var out strings.Builder
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		out.WriteString(wrapLine(line, width))
+	}
+	return out.String()
+}
+
+// wrapLine переносит одну строку по пробелам, не разрывая слова если возможно.
+// ANSI-последовательности игнорируются при подсчёте ширины.
+func wrapLine(line string, width int) string {
+	if visualLen(line) <= width {
+		return line
+	}
+	words := strings.Fields(line)
+	if len(words) == 0 {
+		return line
+	}
+	// Сохраним лидирующие пробелы (markdown-список, indent).
+	leading := ""
+	for _, r := range line {
+		if r == ' ' || r == '\t' {
+			leading += string(r)
+			continue
+		}
+		break
+	}
+	var out strings.Builder
+	col := visualLen(leading)
+	out.WriteString(leading)
+	for i, w := range words {
+		wl := visualLen(w)
+		if i == 0 {
+			out.WriteString(w)
+			col += wl
+			continue
+		}
+		if col+1+wl > width {
+			out.WriteByte('\n')
+			out.WriteString(leading)
+			col = visualLen(leading)
+			out.WriteString(w)
+			col += wl
+		} else {
+			out.WriteByte(' ')
+			out.WriteString(w)
+			col += 1 + wl
+		}
+	}
+	return out.String()
+}
+
+// prefixLines добавляет prefix перед каждой строкой text. Используется для
+// 14-пробельного отступа под продолжение блоков.
+func prefixLines(text, prefix string) string {
+	if text == "" {
+		return ""
+	}
+	var out strings.Builder
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		out.WriteString(prefix)
+		out.WriteString(line)
+	}
+	return out.String()
+}
+
 // CommandHeader — verbose-режим: показываем reason + команду перед запуском.
-// В тихом режиме это место занимает спиннер CommandRunningStart.
 func CommandHeader(reason, command string) {
 	out := os.Stderr
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "%s%s\n", linePrefix("→", cyan), colorize(gray, reason))
-	fmt.Fprintf(out, "%s%s\n", linePrefix("$", yellowBold), colorize(white, command))
+	bw := bodyWidth()
+	if reason != "" {
+		wrapped := wrapBody(reason, bw)
+		lines := strings.Split(wrapped, "\n")
+		fmt.Fprintf(out, "%s%s\n", linePrefix("→", cyan), colorize(gray, lines[0]))
+		for _, l := range lines[1:] {
+			fmt.Fprintf(out, "%s%s\n", indentStr(), colorize(gray, l))
+		}
+	}
+	cmdWrapped := wrapBody(command, bw)
+	cmdLines := strings.Split(cmdWrapped, "\n")
+	fmt.Fprintf(out, "%s%s\n", linePrefix("$", yellowBold), colorize(white, cmdLines[0]))
+	for _, l := range cmdLines[1:] {
+		fmt.Fprintf(out, "%s%s\n", indentStr(), colorize(white, l))
+	}
 }
 
-// CommandLineQuiet печатает финальную одну строку об уже выполненной команде
-// в тихом режиме. Формат:
-//
-//	[HH:MM:SS] ✓ reason · команда · 142ms · 3.2KB
-//	[HH:MM:SS] ✗ reason · команда · 142ms · exit=1 · 547B  (если упало)
-//	[HH:MM:SS] ⏱ reason · команда · таймаут                (если timeout)
-//
-// Использовать ПОСЛЕ остановки спиннера выполнения.
+// CommandLineQuiet печатает финальную строку об уже выполненной команде.
+// Если строка не помещается — переносит части (reason / команда) с правильным
+// 14-пробельным отступом продолжения.
 func CommandLineQuiet(reason, command string, output string, exit int, dur time.Duration, timedOut bool) {
 	out := os.Stderr
 	icon, color := "✓", yellowBold
@@ -361,17 +473,27 @@ func CommandLineQuiet(reason, command string, output string, exit int, dur time.
 	} else if !timedOut {
 		parts = append(parts, colorize(gray, "(пусто)"))
 	}
-	fmt.Fprintf(out, "%s%s\n", linePrefix(icon, color), strings.Join(parts, colorize(gray, " · ")))
+	sep := colorize(gray, " · ")
+	body := strings.Join(parts, sep)
 
-	// При ошибке показываем последние 5 строк вывода. Префикс пустой
-	// (только пробелы под отступ времени+иконки), чтобы visualy "вложить"
-	// строки внутрь предыдущей.
+	bw := bodyWidth()
+	if visualLen(stripANSI(body)) <= bw {
+		fmt.Fprintf(out, "%s%s\n", linePrefix(icon, color), body)
+	} else {
+		// Разбиваем по разделителям между частями: первая часть с временным
+		// префиксом, остальные с 14-пробельным отступом.
+		fmt.Fprintf(out, "%s%s\n", linePrefix(icon, color), parts[0])
+		for _, p := range parts[1:] {
+			fmt.Fprintf(out, "%s%s\n", indentStr(), p)
+		}
+	}
+
+	// При ошибке показываем последние 5 строк вывода.
 	if (exit != 0 || timedOut) && output != "" {
 		lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 		const tailLines = 5
 		start := 0
-		// Отступ: 11 (время) + 1 (пробел) + 1 (icon) + 1 (пробел) = 14 символов.
-		indent := strings.Repeat(" ", 14)
+		indent := indentStr()
 		if len(lines) > tailLines {
 			start = len(lines) - tailLines
 			fmt.Fprintf(out, "%s%s\n", indent, colorize(gray, fmt.Sprintf("(показаны последние %d из %d строк)", tailLines, len(lines))))
@@ -380,6 +502,26 @@ func CommandLineQuiet(reason, command string, output string, exit int, dur time.
 			fmt.Fprintf(out, "%s%s %s\n", indent, colorize(gray, "│"), colorize(gray, l))
 		}
 	}
+}
+
+// stripANSI — убирает ANSI escape-коды для измерения ширины.
+func stripANSI(s string) string {
+	var b strings.Builder
+	inEsc := false
+	for _, r := range s {
+		if r == 0x1b {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if r == 'm' {
+				inEsc = false
+			}
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func fmtBytes(n int) string {
@@ -421,18 +563,23 @@ func CommandResult(output string, exit int, dur time.Duration, timedOut bool) {
 }
 
 // UserCommandBlock — destructive-команда которую юзер должен выполнить сам.
-// Используем тот же linePrefix что и для остальных событий (с временем),
-// плюс под-строки печатаем с отступом-под-префикс.
 func UserCommandBlock(reason, command string) {
 	out := os.Stderr
-	indent := strings.Repeat(" ", 14)
+	indent := indentStr()
+	bw := bodyWidth()
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "%s%s\n", linePrefix("⚠", yellow),
 		colorize(yellow, "выполни сам (требует sudo / меняет систему):"))
 	if reason != "" {
-		fmt.Fprintf(out, "%s%s\n", indent, colorize(gray, reason))
+		for _, l := range strings.Split(wrapBody(reason, bw), "\n") {
+			fmt.Fprintf(out, "%s%s\n", indent, colorize(gray, l))
+		}
 	}
-	fmt.Fprintf(out, "%s%s %s\n", indent, colorize(yellowBold, "$"), colorize(white, command))
+	cmdLines := strings.Split(wrapBody(command, bw-2), "\n") // -2 под "$ "
+	fmt.Fprintf(out, "%s%s %s\n", indent, colorize(yellowBold, "$"), colorize(white, cmdLines[0]))
+	for _, l := range cmdLines[1:] {
+		fmt.Fprintf(out, "%s  %s\n", indent, colorize(white, l))
+	}
 }
 
 // RefusedBlock — мы отказали в авто-запуске.
@@ -441,21 +588,29 @@ func RefusedBlock(command, reason string) {
 	fmt.Fprintf(out, "%s%s: %s\n", linePrefix("✗", red), reason, colorize(gray, command))
 }
 
-// FinalBlock — финальный ответ агента. Заголовок с тем же префиксом времени,
-// чтобы вертикали с командами выровнялись. Текст ответа печатаем в stdout
-// (можно запайпить в файл/jq) с тем же 14-символьным отступом.
-// Trailing \n гарантируем — модели иногда забывают, и текст слипается с PS1.
-func FinalBlock(text string) {
-	indent := strings.Repeat(" ", 14)
+// FinalBlock — финальный ответ агента.
+//
+// Текст ответа модели должен прийти СЫРЫМ (без glamour/Markdown), потому что
+// мы сами отдаём его в render.Markdown с правильной шириной. Все строки —
+// и заголовок, и тело, и хвост — попадают в stdout с одинаковым 14-пробельным
+// отступом, чтобы вертикали с `[HH:MM:SS]`-префиксами совпадали.
+func FinalBlock(rendered string) {
+	indent := indentStr()
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "%s%s\n", linePrefix("★", yellowBold), colorize(yellowBold, "ответ:"))
 	fmt.Fprintln(os.Stderr)
 
-	text = strings.TrimRight(text, " \t\r\n")
-	for _, line := range strings.Split(text, "\n") {
+	rendered = strings.TrimRight(rendered, " \t\r\n")
+	for _, line := range strings.Split(rendered, "\n") {
 		fmt.Fprintln(os.Stdout, indent+line)
 	}
 	fmt.Fprintln(os.Stderr)
+}
+
+// FinalBodyWidth — ширина текста для финального ответа. main.go передаёт её в
+// render.Markdown чтобы glamour сделал правильный wrap.
+func FinalBodyWidth() int {
+	return bodyWidth()
 }
 
 func fmtDur(d time.Duration) string {

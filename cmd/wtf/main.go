@@ -325,7 +325,7 @@ func (c *consoleIO) Refused(command, reason string) {
 }
 
 func (c *consoleIO) Final(summary string) {
-	ui.FinalBlock(render.Markdown(summary))
+	ui.FinalBlock(render.Markdown(summary, ui.FinalBodyWidth()))
 }
 
 // RateLimitWait вызывается когда провайдер вернул 429 и retry будет повторён

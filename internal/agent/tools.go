@@ -22,7 +22,10 @@ func Tools() []provider.Tool {
 			Description: "Запустить безопасную read-only команду на машине пользователя и получить её stdout/stderr. " +
 				"Используй для диагностики: статусы сервисов, логи, ls, cat, ps, df, ip, и т.п. " +
 				"Команда должна быть НЕ модифицирующей: никаких sudo, rm, restart, install, mkfs, dd. " +
-				"Если команда destructive — система откажет, используй show_command вместо этого.",
+				"Если команда destructive — система откажет, используй show_command вместо этого. " +
+				"ВАЖНО: вызывай этот инструмент НЕСКОЛЬКО РАЗ ПАРАЛЛЕЛЬНО в одном ответе " +
+				"(массив tool_calls), а не по одному за раунд. Например для 'nginx не стартует' " +
+				"сразу вызови 4-5 раз: status, journalctl, nginx -t, ls конфигов, права на сертификат.",
 			Schema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
