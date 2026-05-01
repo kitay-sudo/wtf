@@ -126,23 +126,32 @@ func (s *Spinner) Update(prefix string) {
 	s.prefix = prefix
 }
 
+// StopOK останавливает спиннер. Если msg пустая — НИЧЕГО не печатает
+// (ни галочки, ни строки), только убирает текущую анимацию. Это нужно для
+// quiet-режима: после спиннера каллер сам печатает финальную строку через
+// CommandLineQuiet, и галочка от спиннера была бы лишним мусором.
 func (s *Spinner) StopOK(msg string) {
-	if !s.live.Load() {
-		OK(msg)
+	live := s.live.Load()
+	if live {
+		close(s.stop)
+		<-s.done
+	}
+	if msg == "" {
 		return
 	}
-	close(s.stop)
-	<-s.done
 	OK(msg)
 }
 
+// StopFail — то же самое для случая ошибки. Пустой msg = тихий стоп.
 func (s *Spinner) StopFail(msg string) {
-	if !s.live.Load() {
-		Err(msg)
+	live := s.live.Load()
+	if live {
+		close(s.stop)
+		<-s.done
+	}
+	if msg == "" {
 		return
 	}
-	close(s.stop)
-	<-s.done
 	Err(msg)
 }
 
@@ -331,6 +340,22 @@ func CommandLineQuiet(reason, command string, output string, exit int, dur time.
 		parts = append(parts, colorize(gray, "(пусто)"))
 	}
 	fmt.Fprintf(out, "  %s %s\n", icon, strings.Join(parts, colorize(gray, " · ")))
+
+	// При ошибке (exit≠0) показываем последние 5 строк вывода — юзеру важно
+	// видеть ЧТО упало, а не только что упало. Полный вывод всё равно у AI.
+	// При успешных командах мы вывод не показываем (он же может быть на 100 строк).
+	if (exit != 0 || timedOut) && output != "" {
+		lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+		const tailLines = 5
+		start := 0
+		if len(lines) > tailLines {
+			start = len(lines) - tailLines
+			fmt.Fprintf(out, "    %s\n", colorize(gray, fmt.Sprintf("(показаны последние %d из %d строк)", tailLines, len(lines))))
+		}
+		for _, l := range lines[start:] {
+			fmt.Fprintf(out, "    %s %s\n", colorize(gray, "│"), colorize(gray, l))
+		}
+	}
 }
 
 func fmtBytes(n int) string {
@@ -389,11 +414,18 @@ func RefusedBlock(command, reason string) {
 	fmt.Fprintf(out, "  %s %s: %s\n", colorize(red, "✗"), reason, colorize(gray, command))
 }
 
-// FinalBlock — финальный ответ агента, выделенный отступом.
+// FinalBlock — финальный ответ агента. Простое разделение через пустые строки
+// и заголовок "ответ:" без разделительных линий — короче и не мешает чтению.
+// stdout (а не stderr) чтобы можно было запайпить ответ в файл/jq.
+// Trailing \n гарантируем — модели иногда забывают, и текст слипается с PS1.
 func FinalBlock(text string) {
-	out := os.Stdout
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, text)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, colorize(yellowBold, "  ответ:"))
+	fmt.Fprintln(os.Stderr)
+
+	text = strings.TrimRight(text, " \t\r\n")
+	fmt.Fprintln(os.Stdout, text)
+	fmt.Fprintln(os.Stderr)
 }
 
 func fmtDur(d time.Duration) string {

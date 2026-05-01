@@ -176,7 +176,18 @@ func runAgent(args []string) {
 	res, runErr := agent.Run(ctx, cli, envInfo, store, io, question, piped, lang)
 
 	// Сохраняем что есть, даже если агент прерван — это и есть смысл graceful shutdown.
-	if res != nil && len(res.Notes) > 0 {
+	if res != nil {
+		// Fallback: модели часто игнорируют notes несмотря на инструкции.
+		// Если ответ дан, но notes пусты — записываем минимум сами,
+		// чтобы память не оставалась пустой после успешной сессии.
+		if res.Stopped == "finish" && len(res.Notes) == 0 && res.Summary != "" && question != "" {
+			res.Notes = append(res.Notes, memory.Entry{
+				Type:    memory.TypeResolvedIssue,
+				Key:     fallbackIssueKey(question),
+				Content: truncate(question+" → "+firstLine(res.Summary), 200),
+				TTLDays: 30,
+			})
+		}
 		for _, n := range res.Notes {
 			store.Add(n)
 		}
@@ -536,4 +547,35 @@ func mask4(s string) string {
 		return "****"
 	}
 	return s[:4] + "…" + s[len(s)-4:]
+}
+
+// fallbackIssueKey строит стабильный ключ для авто-заметки из вопроса юзера.
+// Берём первые слова, нормализуем — нужно для дедупа: повторный wtf про ту же
+// проблему перезапишет старую запись, а не плодит копии.
+func fallbackIssueKey(question string) string {
+	words := strings.Fields(strings.ToLower(question))
+	if len(words) > 6 {
+		words = words[:6]
+	}
+	return "issue_" + strings.Join(words, "_")
+}
+
+// firstLine — первая непустая строка текста.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		t := strings.TrimSpace(line)
+		if t != "" {
+			return t
+		}
+	}
+	return s
+}
+
+// truncate обрезает строку до n рун (не байт — иначе режется UTF-8 на полуслове).
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
