@@ -636,13 +636,8 @@ func FinalBlock(text string) {
 
 	for _, c := range codes {
 		body := strings.TrimRight(c, "\n")
-		lines := strings.Split(body, "\n")
-		for j, l := range lines {
-			if j == 0 {
-				fmt.Fprintln(os.Stdout, textIndent+colorize(yellowBold, "$ ")+colorize(white, l))
-			} else {
-				fmt.Fprintln(os.Stdout, textIndent+"  "+colorize(white, l))
-			}
+		for _, l := range strings.Split(body, "\n") {
+			fmt.Fprintln(os.Stdout, textIndent+colorize(yellowBold, l))
 		}
 	}
 	fmt.Fprintln(out)
