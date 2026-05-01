@@ -46,6 +46,12 @@ const MaxToolResultBytes = 2048
 // багов "модель забыла что уже это смотрела и крутится по кругу".
 const MaxSameCommandRepeats = 1
 
+// InterRoundDelay — пауза между AI-раундами. Не даёт спамить провайдера на
+// быстрых ответах: если модель ответила за 200мс и мы немедленно отправили
+// следующий запрос, легко упереться в TPM. 800мс — компромисс между скоростью
+// и шансом схватить 429.
+const InterRoundDelay = 800 * time.Millisecond
+
 // IO — абстракция вывода для агента. Главный поток печатает в терминал;
 // тесты могут подсунуть буфер. Все методы принимают уже отформатированный текст.
 type IO interface {
@@ -103,6 +109,17 @@ func Run(
 
 	for i := 0; i < MaxIterations; i++ {
 		res.Iterations = i + 1
+
+		// Throttle: пауза между раундами, чтобы не упереться в TPM провайдера.
+		// Первый раунд — без паузы, юзер ждёт.
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				res.Stopped = "error"
+				return res, ctx.Err()
+			case <-time.After(InterRoundDelay):
+			}
+		}
 
 		io.Thinking(fmt.Sprintf("думаю (%s)...", cli.Name()))
 		resp, err := cli.Chat(ctx, provider.ChatRequest{

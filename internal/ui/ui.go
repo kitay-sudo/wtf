@@ -97,8 +97,9 @@ func NewSpinner(prefix string) *Spinner {
 }
 
 func (s *Spinner) Start() {
+	// non-TTY (cron/pipe): без анимации, просто строка с временным префиксом.
 	if !IsStderrTTY() || os.Getenv("NO_COLOR") != "" {
-		fmt.Fprintf(os.Stderr, "  %s %s\n", colorize(cyan, "→"), s.prefix)
+		fmt.Fprintf(os.Stderr, "%s%s\n", linePrefix("→", cyan), s.prefix)
 		close(s.done)
 		return
 	}
@@ -115,7 +116,12 @@ func (s *Spinner) Start() {
 				fmt.Fprint(os.Stderr, clearLine, visible)
 				return
 			case <-t.C:
-				fmt.Fprintf(os.Stderr, "%s  %s  %s", clearLine, colorize(yellow, spinFrames[i%len(spinFrames)]), s.prefix)
+				// Тот же префикс [HH:MM:SS] что и в финальных строках, но
+				// иконка — это анимированный кадр спиннера. Получается
+				// идеальное вертикальное выравнивание со строкой результата.
+				frame := spinFrames[i%len(spinFrames)]
+				fmt.Fprintf(os.Stderr, "%s%s%s",
+					clearLine, linePrefix(frame, yellow), s.prefix)
 				i++
 			}
 		}
@@ -296,31 +302,47 @@ func max(a, b int) int {
 	return b
 }
 
+// linePrefix возвращает единый префикс для всех событий wtf:
+//
+//	"[HH:MM:SS] <icon>  "
+//
+// Все строки агента (команды, финал, предупреждения) должны начинаться с
+// этого префикса, чтобы вертикали выравнивались.
+//
+// Длина префикса фиксирована: 11 символов времени + 1 пробел + 1 знак icon
+// + 2 пробела = 15. Цвет применяется отдельно (в видимый размер не входит).
+func linePrefix(icon string, iconColor string) string {
+	ts := time.Now().Format("15:04:05")
+	return fmt.Sprintf("%s %s ",
+		colorize(gray, "["+ts+"]"),
+		colorize(iconColor, icon))
+}
+
 // CommandHeader — verbose-режим: показываем reason + команду перед запуском.
 // В тихом режиме это место занимает спиннер CommandRunningStart.
 func CommandHeader(reason, command string) {
 	out := os.Stderr
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "  %s %s\n", colorize(cyan, "→"), colorize(gray, reason))
-	fmt.Fprintf(out, "  %s %s\n", colorize(yellowBold, "$"), colorize(white, command))
+	fmt.Fprintf(out, "%s%s\n", linePrefix("→", cyan), colorize(gray, reason))
+	fmt.Fprintf(out, "%s%s\n", linePrefix("$", yellowBold), colorize(white, command))
 }
 
 // CommandLineQuiet печатает финальную одну строку об уже выполненной команде
 // в тихом режиме. Формат:
 //
-//	✓ reason · команда · 142ms · 3.2 KB
-//	✗ reason · команда · exit=1 · 142ms                       (если упало)
-//	⏱ reason · команда · таймаут                              (если timeout)
+//	[HH:MM:SS] ✓ reason · команда · 142ms · 3.2KB
+//	[HH:MM:SS] ✗ reason · команда · 142ms · exit=1 · 547B  (если упало)
+//	[HH:MM:SS] ⏱ reason · команда · таймаут                (если timeout)
 //
 // Использовать ПОСЛЕ остановки спиннера выполнения.
 func CommandLineQuiet(reason, command string, output string, exit int, dur time.Duration, timedOut bool) {
 	out := os.Stderr
-	icon := colorize(yellowBold, "✓")
+	icon, color := "✓", yellowBold
 	if exit != 0 {
-		icon = colorize(red, "✗")
+		icon, color = "✗", red
 	}
 	if timedOut {
-		icon = colorize(red, "⏱")
+		icon, color = "⏱", red
 	}
 	parts := []string{}
 	if reason != "" {
@@ -339,21 +361,23 @@ func CommandLineQuiet(reason, command string, output string, exit int, dur time.
 	} else if !timedOut {
 		parts = append(parts, colorize(gray, "(пусто)"))
 	}
-	fmt.Fprintf(out, "  %s %s\n", icon, strings.Join(parts, colorize(gray, " · ")))
+	fmt.Fprintf(out, "%s%s\n", linePrefix(icon, color), strings.Join(parts, colorize(gray, " · ")))
 
-	// При ошибке (exit≠0) показываем последние 5 строк вывода — юзеру важно
-	// видеть ЧТО упало, а не только что упало. Полный вывод всё равно у AI.
-	// При успешных командах мы вывод не показываем (он же может быть на 100 строк).
+	// При ошибке показываем последние 5 строк вывода. Префикс пустой
+	// (только пробелы под отступ времени+иконки), чтобы visualy "вложить"
+	// строки внутрь предыдущей.
 	if (exit != 0 || timedOut) && output != "" {
 		lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 		const tailLines = 5
 		start := 0
+		// Отступ: 11 (время) + 1 (пробел) + 1 (icon) + 1 (пробел) = 14 символов.
+		indent := strings.Repeat(" ", 14)
 		if len(lines) > tailLines {
 			start = len(lines) - tailLines
-			fmt.Fprintf(out, "    %s\n", colorize(gray, fmt.Sprintf("(показаны последние %d из %d строк)", tailLines, len(lines))))
+			fmt.Fprintf(out, "%s%s\n", indent, colorize(gray, fmt.Sprintf("(показаны последние %d из %d строк)", tailLines, len(lines))))
 		}
 		for _, l := range lines[start:] {
-			fmt.Fprintf(out, "    %s %s\n", colorize(gray, "│"), colorize(gray, l))
+			fmt.Fprintf(out, "%s%s %s\n", indent, colorize(gray, "│"), colorize(gray, l))
 		}
 	}
 }
@@ -397,34 +421,40 @@ func CommandResult(output string, exit int, dur time.Duration, timedOut bool) {
 }
 
 // UserCommandBlock — destructive-команда которую юзер должен выполнить сам.
-// Жёлтая рамка с предупреждением.
+// Используем тот же linePrefix что и для остальных событий (с временем),
+// плюс под-строки печатаем с отступом-под-префикс.
 func UserCommandBlock(reason, command string) {
 	out := os.Stderr
+	indent := strings.Repeat(" ", 14)
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "  %s %s\n", colorize(yellow, "⚠"), colorize(yellow, "выполни сам (требует sudo / меняет систему):"))
+	fmt.Fprintf(out, "%s%s\n", linePrefix("⚠", yellow),
+		colorize(yellow, "выполни сам (требует sudo / меняет систему):"))
 	if reason != "" {
-		fmt.Fprintf(out, "    %s\n", colorize(gray, reason))
+		fmt.Fprintf(out, "%s%s\n", indent, colorize(gray, reason))
 	}
-	fmt.Fprintf(out, "    %s %s\n", colorize(yellowBold, "$"), colorize(white, command))
+	fmt.Fprintf(out, "%s%s %s\n", indent, colorize(yellowBold, "$"), colorize(white, command))
 }
 
 // RefusedBlock — мы отказали в авто-запуске.
 func RefusedBlock(command, reason string) {
 	out := os.Stderr
-	fmt.Fprintf(out, "  %s %s: %s\n", colorize(red, "✗"), reason, colorize(gray, command))
+	fmt.Fprintf(out, "%s%s: %s\n", linePrefix("✗", red), reason, colorize(gray, command))
 }
 
-// FinalBlock — финальный ответ агента. Простое разделение через пустые строки
-// и заголовок "ответ:" без разделительных линий — короче и не мешает чтению.
-// stdout (а не stderr) чтобы можно было запайпить ответ в файл/jq.
+// FinalBlock — финальный ответ агента. Заголовок с тем же префиксом времени,
+// чтобы вертикали с командами выровнялись. Текст ответа печатаем в stdout
+// (можно запайпить в файл/jq) с тем же 14-символьным отступом.
 // Trailing \n гарантируем — модели иногда забывают, и текст слипается с PS1.
 func FinalBlock(text string) {
+	indent := strings.Repeat(" ", 14)
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, colorize(yellowBold, "  ответ:"))
+	fmt.Fprintf(os.Stderr, "%s%s\n", linePrefix("★", yellowBold), colorize(yellowBold, "ответ:"))
 	fmt.Fprintln(os.Stderr)
 
 	text = strings.TrimRight(text, " \t\r\n")
-	fmt.Fprintln(os.Stdout, text)
+	for _, line := range strings.Split(text, "\n") {
+		fmt.Fprintln(os.Stdout, indent+line)
+	}
 	fmt.Fprintln(os.Stderr)
 }
 
