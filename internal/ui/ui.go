@@ -67,15 +67,6 @@ func TermWidth() int {
 	return 80
 }
 
-// bodyWidth — ширина текстового блока с учётом 14-символьного префикса.
-func bodyWidth() int {
-	w := TermWidth() - indentWidth
-	if w < minBodyWidth {
-		w = minBodyWidth
-	}
-	return w
-}
-
 func colorize(c, s string) string {
 	if !IsStderrTTY() || os.Getenv("NO_COLOR") != "" {
 		return s
@@ -338,16 +329,8 @@ func linePrefix(icon string, iconColor string) string {
 		colorize(iconColor, icon))
 }
 
-// indentStr — пробельный отступ той же ширины что и linePrefix.
-func indentStr() string {
-	return strings.Repeat(" ", indentWidth)
-}
-
-// wrapBody переносит длинные строки по словам так, чтобы текст не выходил за
-// (ширина терминала - indentWidth). Сохраняет существующие переводы строк
-// (списки, абзацы) — только разбивает слишком длинные строки. Каждая строка
-// продолжения получает 14-пробельный отступ снаружи (через prefixLines),
-// здесь мы только обеспечиваем правильную ширину.
+// wrapBody переносит длинные строки по словам в пределах width.
+// Существующие переводы строк сохраняются.
 func wrapBody(text string, width int) string {
 	if width <= 0 {
 		return text
@@ -406,41 +389,24 @@ func wrapLine(line string, width int) string {
 	return out.String()
 }
 
-// prefixLines добавляет prefix перед каждой строкой text. Используется для
-// 14-пробельного отступа под продолжение блоков.
-func prefixLines(text, prefix string) string {
-	if text == "" {
-		return ""
-	}
-	var out strings.Builder
-	for i, line := range strings.Split(text, "\n") {
-		if i > 0 {
-			out.WriteByte('\n')
-		}
-		out.WriteString(prefix)
-		out.WriteString(line)
-	}
-	return out.String()
-}
-
 // CommandHeader — verbose-режим: показываем reason + команду перед запуском.
 func CommandHeader(reason, command string) {
 	out := os.Stderr
 	fmt.Fprintln(out)
-	bw := bodyWidth()
+	bw := TermWidth()
 	if reason != "" {
 		wrapped := wrapBody(reason, bw)
 		lines := strings.Split(wrapped, "\n")
 		fmt.Fprintf(out, "%s%s\n", linePrefix("→", cyan), colorize(gray, lines[0]))
 		for _, l := range lines[1:] {
-			fmt.Fprintf(out, "%s%s\n", indentStr(), colorize(gray, l))
+			fmt.Fprintf(out, "%s\n", colorize(gray, l))
 		}
 	}
 	cmdWrapped := wrapBody(command, bw)
 	cmdLines := strings.Split(cmdWrapped, "\n")
 	fmt.Fprintf(out, "%s%s\n", linePrefix("$", yellowBold), colorize(white, cmdLines[0]))
 	for _, l := range cmdLines[1:] {
-		fmt.Fprintf(out, "%s%s\n", indentStr(), colorize(white, l))
+		fmt.Fprintf(out, "%s\n", colorize(white, l))
 	}
 }
 
@@ -476,15 +442,14 @@ func CommandLineQuiet(reason, command string, output string, exit int, dur time.
 	sep := colorize(gray, " · ")
 	body := strings.Join(parts, sep)
 
-	bw := bodyWidth()
+	bw := TermWidth()
 	if visualLen(stripANSI(body)) <= bw {
 		fmt.Fprintf(out, "%s%s\n", linePrefix(icon, color), body)
 	} else {
-		// Разбиваем по разделителям между частями: первая часть с временным
-		// префиксом, остальные с 14-пробельным отступом.
+		// Не вмещается — разбиваем по разделителям, продолжения от края.
 		fmt.Fprintf(out, "%s%s\n", linePrefix(icon, color), parts[0])
 		for _, p := range parts[1:] {
-			fmt.Fprintf(out, "%s%s\n", indentStr(), p)
+			fmt.Fprintf(out, "%s\n", p)
 		}
 	}
 
@@ -493,13 +458,12 @@ func CommandLineQuiet(reason, command string, output string, exit int, dur time.
 		lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 		const tailLines = 5
 		start := 0
-		indent := indentStr()
 		if len(lines) > tailLines {
 			start = len(lines) - tailLines
-			fmt.Fprintf(out, "%s%s\n", indent, colorize(gray, fmt.Sprintf("(показаны последние %d из %d строк)", tailLines, len(lines))))
+			fmt.Fprintf(out, "%s\n", colorize(gray, fmt.Sprintf("(показаны последние %d из %d строк)", tailLines, len(lines))))
 		}
 		for _, l := range lines[start:] {
-			fmt.Fprintf(out, "%s%s %s\n", indent, colorize(gray, "│"), colorize(gray, l))
+			fmt.Fprintf(out, "%s %s\n", colorize(gray, "│"), colorize(gray, l))
 		}
 	}
 }
@@ -565,20 +529,19 @@ func CommandResult(output string, exit int, dur time.Duration, timedOut bool) {
 // UserCommandBlock — destructive-команда которую юзер должен выполнить сам.
 func UserCommandBlock(reason, command string) {
 	out := os.Stderr
-	indent := indentStr()
-	bw := bodyWidth()
+	bw := TermWidth()
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "%s%s\n", linePrefix("⚠", yellow),
 		colorize(yellow, "выполни сам (требует sudo / меняет систему):"))
 	if reason != "" {
 		for _, l := range strings.Split(wrapBody(reason, bw), "\n") {
-			fmt.Fprintf(out, "%s%s\n", indent, colorize(gray, l))
+			fmt.Fprintf(out, "%s\n", colorize(gray, l))
 		}
 	}
-	cmdLines := strings.Split(wrapBody(command, bw-2), "\n") // -2 под "$ "
-	fmt.Fprintf(out, "%s%s %s\n", indent, colorize(yellowBold, "$"), colorize(white, cmdLines[0]))
+	cmdLines := strings.Split(wrapBody(command, bw-2), "\n")
+	fmt.Fprintf(out, "%s %s\n", colorize(yellowBold, "$"), colorize(white, cmdLines[0]))
 	for _, l := range cmdLines[1:] {
-		fmt.Fprintf(out, "%s  %s\n", indent, colorize(white, l))
+		fmt.Fprintf(out, "  %s\n", colorize(white, l))
 	}
 }
 
@@ -588,16 +551,9 @@ func RefusedBlock(command, reason string) {
 	fmt.Fprintf(out, "%s%s: %s\n", linePrefix("✗", red), reason, colorize(gray, command))
 }
 
-// FinalBlock — финальный ответ агента. Печатается одной сплошной "лентой":
-//
-//	[HH:MM:SS] ★ Ответ: первая строка ответа, далее идут все
-//	                    остальные слова через пробел с word-wrap
-//	                    и выровнены под колонку текста.
-//
-// Все переводы строк / параграфы / списки из текста модели схлопываются в
-// один поток слов — никаких пустых строк внутри ответа. Code-блоки fenced
-// (```) выводятся отдельно после ленты текста, но без пустой строки между
-// ними и хвостом текста.
+// FinalBlock — финальный ответ агента. Заголовок "[HH:MM:SS] ★ Ответ: ..."
+// идёт одной строкой; продолжения текста и code-команды — без отступа,
+// от левого края, с word-wrap по ширине терминала.
 func FinalBlock(text string) {
 	out := os.Stderr
 	fmt.Fprintln(out)
@@ -606,8 +562,8 @@ func FinalBlock(text string) {
 
 	headerLabel := "Ответ: "
 	header := linePrefix("★", yellowBold) + colorize(yellowBold, headerLabel)
-	textIndent := strings.Repeat(" ", indentWidth+visualLen(headerLabel))
-	bw := TermWidth() - len(textIndent)
+	headerVisible := indentWidth + visualLen(headerLabel)
+	bw := TermWidth()
 	if bw < minBodyWidth {
 		bw = minBodyWidth
 	}
@@ -617,30 +573,64 @@ func FinalBlock(text string) {
 		return
 	}
 
-	// Сплошной wrap всего текста. Первая строка идёт после header,
-	// остальные — с textIndent.
 	if prose != "" {
 		body := highlightInline(prose)
-		wrapped := wrapForFinal(body, bw)
-		for j, l := range strings.Split(wrapped, "\n") {
-			if j == 0 {
-				fmt.Fprintln(os.Stdout, header+l)
-			} else {
-				fmt.Fprintln(os.Stdout, textIndent+l)
+		// Первая строка делит ширину с header, остальные — полная ширина.
+		firstLineWidth := bw - headerVisible
+		if firstLineWidth < 10 {
+			firstLineWidth = 10
+		}
+		first, rest := splitFirstLine(body, firstLineWidth)
+		fmt.Fprintln(os.Stdout, header+first)
+		if rest != "" {
+			wrapped := wrapForFinal(rest, bw)
+			for _, l := range strings.Split(wrapped, "\n") {
+				fmt.Fprintln(os.Stdout, l)
 			}
 		}
 	} else {
-		// Текста нет, только code — печатаем header один.
 		fmt.Fprintln(os.Stdout, header)
 	}
 
 	for _, c := range codes {
 		body := strings.TrimRight(c, "\n")
 		for _, l := range strings.Split(body, "\n") {
-			fmt.Fprintln(os.Stdout, textIndent+colorize(yellowBold, l))
+			fmt.Fprintln(os.Stdout, colorize(yellowBold, l))
 		}
 	}
 	fmt.Fprintln(out)
+}
+
+// splitFirstLine отрывает от текста первую строку шириной не больше width
+// (по словам, не разрывая), возвращает первую строку и остаток.
+func splitFirstLine(text string, width int) (first, rest string) {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return "", ""
+	}
+	col := 0
+	idx := 0
+	for i, w := range words {
+		wl := visualLen(w)
+		next := wl
+		if i > 0 {
+			next = col + 1 + wl
+		}
+		if next > width {
+			break
+		}
+		col = next
+		idx = i + 1
+	}
+	if idx == 0 {
+		// Даже первое слово не влезает — отдаём его одно, дальше rest.
+		idx = 1
+	}
+	first = strings.Join(words[:idx], " ")
+	if idx < len(words) {
+		rest = strings.Join(words[idx:], " ")
+	}
+	return first, rest
 }
 
 // flattenFinal схлопывает текст модели в один параграф (prose) и список
@@ -798,12 +788,6 @@ func wrapForFinal(text string, width int) string {
 		}
 	}
 	return out.String()
-}
-
-// FinalBodyWidth — ширина текста для финального ответа (для совместимости с
-// caller'ом, но главная логика wrap — внутри FinalBlock).
-func FinalBodyWidth() int {
-	return bodyWidth()
 }
 
 func fmtDur(d time.Duration) string {

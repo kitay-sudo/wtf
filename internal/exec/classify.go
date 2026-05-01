@@ -83,6 +83,9 @@ var safeFirstTokens = map[string]bool{
 	"crontab": true, "iptables": true, "nft": true, "ufw": true,
 	"ssh-add": true,
 	"openssl": true, "certbot": true,
+	// process managers — read-only подкоманды разрешены, write-операции
+	// (start/stop/restart/delete/save/...) перехватываются isDestructiveSubcommand.
+	"pm2": true, "supervisorctl": true, "forever": true,
 }
 
 // Команды которые модифицируют систему — никогда не запускаем сами.
@@ -220,6 +223,25 @@ func isDestructiveSubcommand(tokens []string) bool {
 	case "go":
 		switch sub {
 		case "install", "get", "mod", "clean", "build", "run":
+			return true
+		}
+	case "pm2":
+		switch sub {
+		case "start", "stop", "restart", "reload", "delete", "kill",
+			"save", "resurrect", "update", "install", "uninstall",
+			"flush", "reloadLogs", "startup", "unstartup", "scale",
+			"reset", "monit":
+			return true
+		}
+	case "supervisorctl":
+		switch sub {
+		case "start", "stop", "restart", "reload", "update", "shutdown",
+			"add", "remove", "clear":
+			return true
+		}
+	case "forever":
+		switch sub {
+		case "start", "stop", "stopall", "restart", "restartall":
 			return true
 		}
 	}
