@@ -95,7 +95,7 @@ Write-Host ""
 Write-Host "  [!?] готово!" -ForegroundColor White
 Write-Host ""
 Write-Host "  Дальше:"
-Write-Host "    PS> wtf config       " -NoNewline; Write-Host "# настроить провайдера и ключ" -ForegroundColor DarkGray
-Write-Host "    PS> wtf init         " -NoNewline; Write-Host "# поставить хук в `$PROFILE" -ForegroundColor DarkGray
-Write-Host "    PS> wtf              " -NoNewline; Write-Host "# объяснить последнюю ошибку" -ForegroundColor DarkGray
+Write-Host "    PS> wtf config              " -NoNewline; Write-Host "# настроить провайдера и ключ" -ForegroundColor DarkGray
+Write-Host "    PS> wtf nginx не стартует   " -NoNewline; Write-Host "# запустить диагностику" -ForegroundColor DarkGray
+Write-Host "    PS> wtf memory show         " -NoNewline; Write-Host "# что агент о тебе помнит" -ForegroundColor DarkGray
 Write-Host ""

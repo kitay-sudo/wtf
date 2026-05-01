@@ -24,15 +24,12 @@ type Config struct {
 	DefaultProvider Provider                    `json:"default_provider"`
 	Language        string                      `json:"language"`
 	Providers       map[Provider]ProviderConfig `json:"providers"`
-	RedactionShown  bool                        `json:"redaction_consent_shown"`
-	CacheEnabled    bool                        `json:"cache_enabled"`
 }
 
 func Default() *Config {
 	return &Config{
 		DefaultProvider: ProviderClaude,
 		Language:        "ru",
-		CacheEnabled:    true,
 		Providers: map[Provider]ProviderConfig{
 			ProviderClaude: {Model: KnownModels[ProviderClaude][0]},
 			ProviderOpenAI: {Model: KnownModels[ProviderOpenAI][0]},

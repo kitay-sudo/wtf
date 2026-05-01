@@ -287,6 +287,75 @@ func max(a, b int) int {
 	return b
 }
 
+// CommandHeader — заголовок блока команды (───→ команда ──────).
+// Используется агентом перед запуском read-only команды.
+func CommandHeader(reason, command string) {
+	out := os.Stderr
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "  %s %s\n", colorize(cyan, "→"), colorize(gray, reason))
+	fmt.Fprintf(out, "  %s %s\n", colorize(yellowBold, "$"), colorize(white, command))
+}
+
+// CommandResult — компактный итог выполнения команды.
+// Если timed_out=true или exit≠0 — выделяем цветом.
+func CommandResult(output string, exit int, dur time.Duration, timedOut bool) {
+	out := os.Stderr
+	status := colorize(gray, fmt.Sprintf("exit=%d · %s", exit, fmtDur(dur)))
+	if exit != 0 {
+		status = colorize(yellow, fmt.Sprintf("exit=%d · %s", exit, fmtDur(dur)))
+	}
+	if timedOut {
+		status = colorize(red, fmt.Sprintf("таймаут · %s", fmtDur(dur)))
+	}
+	if output == "" {
+		fmt.Fprintf(out, "  %s %s\n", colorize(gray, "└"), status+colorize(gray, " · (пусто)"))
+		return
+	}
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+	maxLines := 20
+	for i, l := range lines {
+		if i >= maxLines {
+			fmt.Fprintf(out, "  %s %s\n", colorize(gray, "│"),
+				colorize(gray, fmt.Sprintf("...ещё %d строк...", len(lines)-maxLines)))
+			break
+		}
+		fmt.Fprintf(out, "  %s %s\n", colorize(gray, "│"), l)
+	}
+	fmt.Fprintf(out, "  %s %s\n", colorize(gray, "└"), status)
+}
+
+// UserCommandBlock — destructive-команда которую юзер должен выполнить сам.
+// Жёлтая рамка с предупреждением.
+func UserCommandBlock(reason, command string) {
+	out := os.Stderr
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "  %s %s\n", colorize(yellow, "⚠"), colorize(yellow, "выполни сам (требует sudo / меняет систему):"))
+	if reason != "" {
+		fmt.Fprintf(out, "    %s\n", colorize(gray, reason))
+	}
+	fmt.Fprintf(out, "    %s %s\n", colorize(yellowBold, "$"), colorize(white, command))
+}
+
+// RefusedBlock — мы отказали в авто-запуске.
+func RefusedBlock(command, reason string) {
+	out := os.Stderr
+	fmt.Fprintf(out, "  %s %s: %s\n", colorize(red, "✗"), reason, colorize(gray, command))
+}
+
+// FinalBlock — финальный ответ агента, выделенный отступом.
+func FinalBlock(text string) {
+	out := os.Stdout
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, text)
+}
+
+func fmtDur(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
 var spinMu sync.Mutex
 
 func WithSpinner(label string, fn func() error) error {

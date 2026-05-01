@@ -1,6 +1,6 @@
-# wtf — AI-объяснялка для терминала
+# wtf — терминальный sysadmin-агент
 
-> Видишь в терминале что-то непонятное — упавшую команду, статус сервиса, дамп конфига, странный вывод утилиты — пиши `wtf`. Получаешь короткое объяснение и при необходимости 2-3 готовых действия. Один Go-бинарь, три AI-провайдера на выбор, MIT.
+> Опиши проблему словами — `wtf nginx не стартует` — агент сам выполнит диагностические команды на твоей машине и вернёт решение. Запоминает что узнал о тебе и твоём сервере между запусками. Один Go-бинарь, три AI-провайдера на выбор, MIT.
 
 [![go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -38,73 +38,55 @@ sudo mv wtf /usr/local/bin/
 
 ## Что это
 
-`wtf` — это CLI-утилита, которая берёт **последний вывод твоего терминала** (stdout + stderr последней команды) и объясняет его человеческими словами. Это не только про ошибки: статус сервиса, дамп конфига, JSON от API, лог-файл, вывод незнакомой утилиты — что угодно, что у тебя сейчас в окне терминала. Если есть что чинить — добавит 2-3 готовых действия.
+`wtf` — это терминальный агент. Ты пишешь ему словами что у тебя сломалось — он сам выполняет на твоей машине безопасные read-only команды (`systemctl status`, `journalctl`, `ls`, `cat`, и т.д.), читает их вывод, и итеративно докапывается до причины. Когда нужно что-то поменять (sudo, restart, install, rm) — показывает точную команду, чтобы ты выполнил сам. Никогда не запускает destructive-команды без твоего ведома.
 
-### Пример 1 — упавшая команда
+Между сессиями агент запоминает что узнал о твоей машине: версии сервисов, нестандартные пути конфигов, твои предпочтения. В следующий раз он уже знает контекст.
 
-```
-$ npm run build
-Error: Cannot find module './pages/Landing' imported from src/App.jsx
-
-$ wtf
-  ⠹  анализ через claude (haiku-4-5)...
-  ✓  Готово · 1.2s · claude
-
-  Что случилось: Vite не находит файл src/pages/Landing.jsx — путь импорта не совпадает.
-
-  Как починить:
-  1. Проверь, что файл существует:
-       ls src/pages/Landing.jsx
-  2. Если расширение .jsx — Vite требует его явно:
-       import Landing from './pages/Landing.jsx'
-  3. Или добавь resolve.extensions в vite.config.js
-```
-
-### Пример 2 — просто разобраться в выводе
-
-Команда отработала успешно, но вывод нечитаемый — `wtf` это тоже умеет.
+### Пример
 
 ```
-$ systemctl status nginx
-● nginx.service - A high performance web server and a reverse proxy server
-     Loaded: loaded (/lib/systemd/system/nginx.service; enabled; vendor preset: enabled)
-     Active: active (running) since Tue 2026-04-29 14:22:11 UTC; 18h ago
-       Docs: man:nginx(8)
-    Process: 1247 ExecStartPre=/usr/sbin/nginx -t -q -g daemon on; master_process on; (code=exited, status=0/SUCCESS)
-    Process: 1248 ExecStart=/usr/sbin/nginx -g daemon on; master_process on; (code=exited, status=0/SUCCESS)
-   Main PID: 1249 (nginx)
-      Tasks: 3 (limit: 4915)
-     Memory: 12.4M
-        CPU: 142ms
-     CGroup: /system.slice/nginx.service
-             ├─1249 "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
-             ├─1250 "nginx: worker process"
-             └─1251 "nginx: worker process"
+$ wtf nginx не стартует
 
-$ wtf
-  ✓  Готово · 0.9s · claude
+  → проверяю статус сервиса
+  $ systemctl status nginx -l
+  │ ● nginx.service - A high performance web server
+  │      Active: failed (Result: exit-code) since Thu 2026-04-30 18:15
+  │     Process: 2418961 ExecStart=/usr/sbin/nginx ... (code=exited, status=1)
+  │ nginx: [emerg] unknown directive "serer_name" in /etc/nginx/sites-enabled/default:5
+  └ exit=3 · 142ms
 
-  Что это: nginx работает нормально — сервис запущен 18 часов назад,
-  master + 2 worker процесса, потребляет 12 МБ памяти.
+  → читаю последние логи
+  $ journalctl -u nginx -n 20 --no-pager
+  │ apr 30 18:15:08 nginx[2418961]: nginx: [emerg] unknown directive "serer_name"
+  │ apr 30 18:15:08 nginx[2418961]: nginx: configuration file /etc/nginx/nginx.conf test failed
+  └ exit=0 · 89ms
 
-  На что обратить внимание:
-  • Active: active (running) — всё ок
-  • ExecStartPre с status=0/SUCCESS — конфиг прошёл проверку при старте
-  • 2 worker process — стандартно для systemd-юнита из коробки
+  Проблема: опечатка в /etc/nginx/sites-enabled/default:5 — `serer_name`
+  вместо `server_name`.
 
-  Если что-то нужно: nginx -t (проверить конфиг), journalctl -u nginx -f (живые логи).
+  ⚠ выполни сам (требует sudo / меняет систему):
+    что эта команда сделает: исправит опечатку и перезапустит nginx
+    $ sudo sed -i 's/serer_name/server_name/' /etc/nginx/sites-enabled/default
+    $ sudo systemctl restart nginx
 ```
+
+### Ещё пример — пайп логов
+
+```bash
+$ tail -f /var/log/app.log | head -100 | wtf что не так
+```
+
+Агент возьмёт переданный лог как контекст, при необходимости запустит дополнительные команды для диагностики, вернёт решение.
 
 ## Возможности
 
-- 🧠 **Три провайдера на выбор** — Claude, OpenAI или Gemini. Переключение одной командой. Твой ключ, твой счёт, ничего не проксируется.
-- 🐚 **Любой shell** — bash, zsh, fish, PowerShell. `wtf init` ставит хук, после этого захват ошибок идёт автоматически.
-- ⚡ **Спиннер и красивый Markdown** — ответ рендерится прямо в терминале с цветами, заголовками, выделенными командами.
-- 🛡️ **Чистка секретов** — 13 regex-правил перед отправкой в API. Токены, JWT, пароли, email, basic-auth URL, абсолютные пути домашней директории — всё вычищается.
-- 💾 **Локальный кеш** — повторные одинаковые запросы возвращаются мгновенно из `~/.wtf/cache/`. TTL 30 дней.
-- 🔒 **Zero trust** — нет своего бэкенда, нет аккаунтов, нет телеметрии. Только локальный конфиг и исходящие HTTPS на API провайдера.
-- 🪶 **Один бинарь** — Go, ~8 МБ, без зависимостей.
-- 🌍 **RU + EN** — объяснение на русском по умолчанию, `wtf --lang en` — на английском.
+- 🤖 **Tool-use агент** — модель сама решает какие команды запустить, читает их вывод, итерирует. До 15 раундов диагностики на сессию.
+- 🛡️ **Safe-by-default** — встроенный classifier разделяет команды на безопасные (run_command — выполняем сами) и destructive (show_command — показываем юзеру). sudo/rm/restart/install никогда не запускаются автоматически.
+- 🧠 **Память между сессиями** — после каждой решённой проблемы агент сохраняет ключевые факты: версии сервисов, пути конфигов, предпочтения. В `~/.wtf/memory/store.json`. Раз в N сессий сжимается через AI чтобы не разрослось.
+- 🌐 **Три провайдера** — Claude, OpenAI, Gemini. Все три используют tool-use API для надёжного парсинга. Переключение через `--provider`.
+- 🔒 **Чистка секретов** — 13 regex-правил перед отправкой в API и перед записью в память. Токены, JWT, пароли, email, basic-auth URL — вычищаются.
+- 🪶 **Один бинарь** — Go, ~8 МБ, без зависимостей. Никаких shell-хуков, обёрток, изменений в .bashrc.
+- 🌍 **RU + EN** — `wtf --lang en` если нужен английский.
 
 ## Быстрый старт
 
@@ -112,42 +94,33 @@ $ wtf
 # 1. Настрой провайдера (интерактивный wizard)
 wtf config
 
-# 2. Поставь shell-хук — он сам подхватит новый rc-файл, делать source не надо
-wtf init
+# 2. Запусти диагностику — словами, без кавычек
+wtf nginx не стартует
+wtf почему медленно работает диск
+wtf что значит этот вывод | cat strange-error.log
 
-# 3. Запусти команду через префикс wtfc, потом просто wtf:
-wtfc service nginx status   # выполняется как обычно, плюс вывод сохраняется
-wtf                          # объясни сохранённый вывод
+# 3. Посмотри что агент о тебе помнит (опционально)
+wtf memory show
 ```
-
-### Способы передать вывод в wtf
-
-| Способ | Когда использовать |
-|---|---|
-| `wtfc <команда>` | основной — префикс перед командой, захватывает stdout+stderr |
-| `<команда> 2>&1 \| wtf` | пайп — когда не хочешь префиксить |
-| `wtf --rerun` | перезапустить последнюю упавшую команду (только идемпотентные!) |
-| `wtf --explain "<text>"` | вставить текст руками |
-
-`wtfc` — это shell-функция, которую ставит `wtf init`. Под капотом — `tee` в `~/.wtf/last_output`, ровно одна строка кода. Не ломает интерактивные TUI (vim/less/htop через `wtfc` запускать смысла нет).
 
 ## Команды
 
 ```
-wtfc <команда>             выполнить команду с захватом stdout/stderr
-wtf                        объяснить последний захваченный вывод
-<команда> 2>&1 | wtf       запайпить вывод напрямую
-wtf --rerun                перезапустить последнюю команду и объяснить
-wtf --explain "<text>"     объяснить переданный текст
-wtf --provider <name>      разово выбрать провайдера (claude|openai|gemini)
-wtf --no-cache             не использовать кеш
-wtf --lang <ru|en>         язык ответа
+wtf <вопрос>                  запустить диагностику
+cat err.log | wtf <вопрос>    диагностика + содержимое stdin как контекст
+wtf                           интерактив: запросит вопрос
 
-wtf init [shell]           установить shell-хук (bash|zsh|fish|powershell)
-wtf config                 интерактивная настройка
-wtf config show            показать текущий конфиг
-wtf config set k=v         задать значение программно
-wtf version                версия
+  --provider <name>           разово выбрать провайдера (claude|openai|gemini)
+  --lang <ru|en>              язык ответа
+
+wtf config                    настройка провайдера, ключей, моделей
+wtf config show               показать текущий конфиг
+wtf config set k=v            задать значение
+
+wtf memory show               показать что агент о тебе помнит
+wtf memory clear              стереть память
+
+wtf version                   версия
 ```
 
 ## Конфигурация
@@ -158,7 +131,6 @@ wtf version                версия
 {
   "default_provider": "claude",
   "language": "ru",
-  "cache_enabled": true,
   "providers": {
     "claude": { "api_key": "sk-ant-...", "model": "claude-haiku-4-5-20251001" },
     "openai": { "api_key": "sk-...",     "model": "gpt-4o-mini" },
@@ -167,7 +139,7 @@ wtf version                версия
 }
 ```
 
-Можно задавать ключи через переменные окружения — это переопределяется конфигом:
+Можно задавать ключи через переменные окружения — конфиг переопределяет:
 
 - `ANTHROPIC_API_KEY` — для Claude
 - `OPENAI_API_KEY` — для OpenAI
@@ -176,28 +148,60 @@ wtf version                версия
 ## Как это работает
 
 ```
-┌──────────────┐
-│   wtf CLI    │
-└──────┬───────┘
+   wtf <вопрос>
        │
-       ├──► читает ~/.wtf/last_meta (cmd, exit code) — пишется shell-хуком
-       ├──► читает stdout/stderr последней команды (или --rerun)
+       ├──► собираем контекст: OS, shell, cwd, git, package manager
+       ├──► загружаем память из ~/.wtf/memory/store.json
        │
-       ├──► собирает контекст: OS, shell, cwd, git branch, package manager
+       ▼
+   ┌─────────────────── цикл агента (до 15 итераций) ───────────────────┐
+   │                                                                    │
+   │  AI → решает что нужно, вызывает tool:                             │
+   │                                                                    │
+   │   • run_command(cmd, reason) — wtf классифицирует команду:         │
+   │       safe        → запускает на машине, возвращает stdout/stderr  │
+   │       destructive → отказывает, говорит "используй show_command"   │
+   │       unknown     → отказывает                                     │
+   │                                                                    │
+   │   • show_command(cmd, reason) — wtf печатает юзеру с пометкой ⚠   │
+   │       юзер выполняет сам, вывод (если нужно) пейстит обратно       │
+   │                                                                    │
+   │   • finish(summary, notes) — финал.                                │
+   │       summary  → в терминал юзеру (Markdown)                       │
+   │       notes    → в ~/.wtf/memory/store.json после редакции         │
+   │                                                                    │
+   └────────────────────────────────────────────────────────────────────┘
        │
-       ├──► redaction: 13 regex-правил вычищают секреты
-       │
-       ├──► проверяет локальный кеш по sha256(provider+model+lang+cmd+output)
-       │
-       ├──► POST в API провайдера (Claude/OpenAI/Gemini)
-       │       — Claude использует prompt caching для system-промпта
-       │
-       └──◄ Markdown-ответ → ANSI-render в терминал
+       ├──► раз в 20 сессий — консолидация памяти через AI (сжимает старое)
+       └──► выход
 ```
+
+### Безопасность и классификация команд
+
+[`internal/exec/classify.go`](internal/exec/classify.go) разделяет команды на три класса:
+
+- **safe** — read-only утилиты: `ls cat tail grep ps systemctl status journalctl docker ps git status nginx -t apt list ip ss lsof df` и т.д. Whitelist первого токена + проверка subcommand (например `git push` — destructive даже если `git` в whitelist).
+- **destructive** — `sudo rm mv dd mkfs chmod chown systemctl restart apt install pip install git push docker rm ...` плюс опасные паттерны (`> /etc/...`, `| sh`, `&` в фоне).
+- **unknown** — всё остальное. Отказываем по умолчанию.
+
+Безопасные команды запускаются автоматически с лимитом 30s и обрезкой вывода до 8 КБ. Destructive — только показываются юзеру.
+
+### Память
+
+После сессии агент сохраняет короткие заметки 4 типов:
+
+- `machine_fact` — стабильные факты (TTL 0 = вечно)
+- `service_state` — версии и состояние сервисов (TTL 30 дней)
+- `user_preference` — привычки юзера (TTL 0)
+- `resolved_issue` — решённые проблемы (TTL 30 дней)
+
+Все записи прогоняются через `internal/redact/` — секреты не уезжают в файл. При старте загружается до 2 КБ контекста в system-промпт.
+
+Раз в 20 сессий (или при превышении 100 записей) запускается консолидация: AI получает все заметки, возвращает сжатый список из самых ценных, старые перезаписываются.
 
 ### Redaction
 
-Перед отправкой работает следующий список regex-фильтров:
+Перед отправкой в API и перед записью в память работают regex-фильтры:
 
 | Класс | Шаблон |
 |---|---|
@@ -208,35 +212,30 @@ wtf version                версия
 | Slack token | `xox[baprs]-...` |
 | JWT | `eyJ...\.eyJ...\....` |
 | Bearer token | `Bearer <anything>` |
-| AWS access key | `AKIA[0-9A-Z]{16}` |
-| AWS secret | `aws_secret*=...` |
+| AWS access key / secret | `AKIA...` / `aws_secret*=...` |
 | Private keys | `-----BEGIN ... PRIVATE KEY-----...` |
-| Generic password/secret/token KV | `password=...`, `token=...`, etc. |
-| Basic-auth in URL | `https://user:pass@host` |
+| Generic password/secret/token KV | `password=...`, `token=...` |
+| Basic-auth URL | `https://user:pass@host` |
 | Email | `user@host.tld` |
 | Home path | `$HOME → ~` |
-
-При первом запуске показывается консент-баннер с тем, что именно отправляется — после подтверждения он не повторяется.
 
 ## Roadmap
 
 - [ ] `--offline` режим через ollama (локальный LLM)
-- [ ] Streaming ответа (сейчас ждём всё одним куском)
-- [ ] `wtf --share` — обезличенная ссылка на GitHub Gist для коллег
-- [ ] Поддержка `cmd.exe` на Windows
-- [ ] `wtf doctor` — диагностика установки хуков
+- [ ] Streaming tool-use ответов
+- [ ] Многосессионность: возврат к прошлой проблеме через `wtf resume`
 - [ ] Brew tap, scoop, AUR, deb/rpm
 
 ## Безопасность
 
-- Конфиг и кеш лежат в `~/.wtf/` с правами `0600` / `0644` (директория).
+- Конфиг и память лежат в `~/.wtf/` с правами `0600`.
 - Ключи отображаются маскированно (`sk-a…XXXX`).
 - Никакой удалённой телеметрии.
 - Если найдёшь утечку секрета через regex-фильтр — присылай PR с тестом.
 
 ## Вклад
 
-Если проект помог — поставь ⭐ на [github.com/kitay-sudo/wtf](https://github.com/kitay-sudo/wtf). Это бесплатно для тебя и реально помогает: чем больше звёзд, тем проще другим находить инструмент.
+Если проект помог — поставь ⭐ на [github.com/kitay-sudo/wtf](https://github.com/kitay-sudo/wtf).
 
 PR welcome. Запустить локально:
 
@@ -244,7 +243,7 @@ PR welcome. Запустить локально:
 git clone https://github.com/kitay-sudo/wtf
 cd wtf
 go build -o wtf ./cmd/wtf
-./wtf --explain "Error: test"   # для smoke-test
+./wtf "что значит exit 137"
 ```
 
 Фронтенд лендинга:
@@ -252,54 +251,37 @@ go build -o wtf ./cmd/wtf
 ```bash
 cd frontend
 npm install
-npm run dev   # http://localhost:5173
+npm run dev
 ```
 
 ### Поддержать криптой
-
-Если хочется отблагодарить напрямую — буду рад. После доната напиши в Telegram [@kitay9](https://t.me/kitay9) свой ник, добавлю в стену чести на лендинге.
 
 | Сеть | Адрес |
 |---|---|
 | **USDT** · TRON (TRC20) | `TF9F2FPkreHVfbe8tZtn4V76j3jLo4SeXM` |
 | **TON** · The Open Network | `UQBl88kXWJWyHkDPkWNYQwwSCiCAIfA2DiExtZElwJFlIc1o` |
 
+После доната напиши в Telegram [@kitay9](https://t.me/kitay9) свой ник, добавлю в стену чести на лендинге.
+
 ### Рекомендую: Timeweb Cloud
 
-[Timeweb Cloud](https://timeweb.cloud/?i=104289) — российский VPS-хостинг, на котором живут наши боевые сервера. Быстрая панель, NVMe, развёртывание за минуту. Если возьмёшь сервер — могу помочь с первичной настройкой: пиши в Telegram [@kitay9](https://t.me/kitay9).
-
-*Ссылка партнёрская (`ad`).*
+[Timeweb Cloud](https://timeweb.cloud/?i=104289) — российский VPS-хостинг, на котором живут наши боевые сервера. Быстрая панель, NVMe, развёртывание за минуту. *Ссылка партнёрская.*
 
 ### Выпуск нового релиза
 
-Релиз — это git-тег `vX.Y.Z`, всё остальное автоматизировано:
+Релиз — это git-тег `vX.Y.Z`:
 
 ```bash
 # Windows
 scripts\release.bat patch    # bug-fix:    v0.1.0 → v0.1.1
 scripts\release.bat minor    # фича:        v0.1.0 → v0.2.0
 scripts\release.bat major    # breaking:    v0.1.0 → v1.0.0
-scripts\release.bat v0.5.0   # явная версия
 
 # macOS / Linux / Git Bash
 ./scripts/release.sh patch
 ```
 
-Скрипт:
-
-1. Проверяет что ты на `main`, working tree чистый и синхронизирован с `origin`.
-2. Считает следующую версию по последнему тегу (или берёт явную).
-3. Показывает список коммитов с прошлого релиза и просит подтверждения.
-4. Создаёт annotated-тег и пушит его в `origin`.
-
-После пуша тега запускается [`.github/workflows/release.yml`](.github/workflows/release.yml):
-
-- matrix-сборка под 6 платформ (`linux/darwin/windows × amd64/arm64`) с прокинутой версией через `-ldflags "-X main.version=$TAG"`
-- архивы `wtf_<os>_<arch>.tar.gz` (или `.zip` для Windows) с README + LICENSE внутри
-- `SHA256SUMS.txt` для верификации
-- GitHub Release с авто-сгенерированными notes (по коммитам с прошлого тега)
-
-Через 2-3 минуты бинари висят на странице Releases, а `install.sh` / `install.ps1` начинают видеть новую версию через GitHub API.
+После пуша тега запускается [`.github/workflows/release.yml`](.github/workflows/release.yml) — matrix-сборка под 6 платформ, архивы, SHA256SUMS, GitHub Release.
 
 ## Лицензия
 

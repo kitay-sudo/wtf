@@ -1,41 +1,49 @@
+// wtf — терминальный sysadmin-агент.
+//
+// Запуск:
+//
+//	wtf <вопрос>             запустить диагностику
+//	cat err.log | wtf <q>    тоже самое + содержимое stdin как контекст
+//	wtf config               настройка провайдера/ключа/языка
+//	wtf version              версия
+//
+// Никаких shell-хуков, обёрток вокруг команд, захвата stdout. Юзер описывает
+// проблему словами, агент сам выполняет диагностические команды (read-only)
+// и предлагает действия. Destructive-команды (sudo/install/restart) только
+// показываются — выполняет их юзер вручную.
 package main
 
 import (
 	"bufio"
 	stdctx "context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"golang.org/x/term"
 
-	"github.com/bitcoff/wtf/internal/cache"
+	"github.com/bitcoff/wtf/internal/agent"
 	"github.com/bitcoff/wtf/internal/config"
 	wctx "github.com/bitcoff/wtf/internal/context"
+	"github.com/bitcoff/wtf/internal/memory"
 	"github.com/bitcoff/wtf/internal/provider"
-	"github.com/bitcoff/wtf/internal/redact"
 	"github.com/bitcoff/wtf/internal/render"
-	"github.com/bitcoff/wtf/internal/shellhook"
 	"github.com/bitcoff/wtf/internal/ui"
 )
 
-// version is overridden at build time via:
-//   go build -ldflags "-X main.version=v0.1.0"
-// release.yml passes the git tag here.
+// version подменяется через -ldflags при release-сборке.
 var version = "dev"
 
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "init":
-			runInit(os.Args[2:])
-			return
 		case "config":
 			runConfig(os.Args[2:])
+			return
+		case "memory":
+			runMemoryCmd(os.Args[2:])
 			return
 		case "version", "--version", "-v":
 			fmt.Println("wtf", version)
@@ -45,41 +53,60 @@ func main() {
 			return
 		}
 	}
-	runExplain(os.Args[1:])
+	runAgent(os.Args[1:])
 }
 
 func printHelp() {
-	fmt.Print(`wtf [!?] — AI-объяснялка для терминала
+	fmt.Print(`wtf — терминальный sysadmin-агент
 
 Использование:
-  wtfc <команда>             запустить команду с захватом вывода, потом 'wtf'
-  <команда> 2>&1 | wtf       запайпить вывод напрямую (без префикса)
-  wtf --explain "<text>"     объяснить переданный текст
-  wtf --rerun                перезапустить последнюю команду
-  wtf                        объяснить последний захваченный вывод
+  wtf <вопрос>                 запустить диагностику
+  cat error.log | wtf <вопрос>  диагностика + содержимое stdin как контекст
+  wtf                          интерактив: запросит вопрос
 
-  wtf --provider <name>      разово выбрать провайдера (claude|openai|gemini)
-  wtf --no-cache             не использовать кеш
-  wtf --lang <ru|en>         язык ответа
+Опции:
+  --provider <name>            claude | openai | gemini
+  --lang <ru|en>               язык ответа (по умолчанию из config)
 
 Команды:
-  wtf init [shell]           установить shell-хук (bash|zsh|fish|powershell)
-                             добавь --no-reload чтобы не запускать новый shell
-  wtf config                 интерактивная настройка (провайдер, ключи, модели)
-  wtf config show            показать текущий конфиг
-  wtf config set k=v         задать значение
-  wtf version                версия
+  wtf config                   настройка провайдера, ключей, моделей
+  wtf config show              показать текущий конфиг
+  wtf config set k=v           задать значение
+  wtf memory show              показать что агент о тебе помнит
+  wtf memory clear             стереть память
+  wtf version                  версия
+
+Примеры:
+  wtf nginx не стартует
+  wtf почему медленно работает диск
+  journalctl -u nginx | wtf что не так
 `)
 }
 
-func runExplain(args []string) {
-	fs := flag.NewFlagSet("explain", flag.ExitOnError)
-	rerun := fs.Bool("rerun", false, "перезапустить последнюю команду")
-	explain := fs.String("explain", "", "явный текст ошибки")
-	providerFlag := fs.String("provider", "", "claude|openai|gemini")
-	noCache := fs.Bool("no-cache", false, "не использовать кеш")
-	lang := fs.String("lang", "", "ru|en")
-	_ = fs.Parse(args)
+// runAgent — основной режим. Парсит позиционный промпт, запускает agent.Run.
+func runAgent(args []string) {
+	// Флаги парсим вручную чтобы не съесть слова из промпта.
+	// Правило: если первый токен — "--что-то", это флаг. Иначе всё в промпт.
+	var providerFlag, langFlag string
+	var passthrough []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--provider" && i+1 < len(args):
+			providerFlag = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--provider="):
+			providerFlag = strings.TrimPrefix(a, "--provider=")
+		case a == "--lang" && i+1 < len(args):
+			langFlag = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--lang="):
+			langFlag = strings.TrimPrefix(a, "--lang=")
+		default:
+			passthrough = append(passthrough, a)
+		}
+	}
+	question := strings.TrimSpace(strings.Join(passthrough, " "))
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -87,183 +114,156 @@ func runExplain(args []string) {
 		os.Exit(1)
 	}
 
-	// First run: запускаем wizard если ни у одного провайдера нет ключа
 	if !anyKeyConfigured(cfg) {
-		ui.Banner("wtf — объяснялка ошибок", "первый запуск — настроим за минуту")
+		ui.Banner("wtf — sysadmin-агент", "первый запуск — настроим провайдера за минуту")
 		runWizard(cfg)
 		fmt.Fprintln(os.Stderr)
 	}
 
 	prov := cfg.DefaultProvider
-	if *providerFlag != "" {
-		prov = config.Provider(*providerFlag)
+	if providerFlag != "" {
+		prov = config.Provider(providerFlag)
 	}
-	language := cfg.Language
-	if *lang != "" {
-		language = *lang
+	lang := cfg.Language
+	if langFlag != "" {
+		lang = langFlag
 	}
 
-	var cap *shellhook.Capture
-	switch {
-	case *explain != "":
-		cap = &shellhook.Capture{Output: *explain, Source: "flag"}
-	case hasPipedStdin():
-		// `<команда> 2>&1 | wtf` — самый надёжный способ передать вывод.
-		// Если stdin не-TTY но пустой (например, `wtf </dev/null` или запуск
-		// из cron) — не выходим с ошибкой, проваливаемся в обычный flow
-		// чтения хука, как будто стдина не было.
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			ui.Err(fmt.Sprintf("чтение stdin: %v", err))
+	piped := readPipedStdin()
+
+	// Если нет ни вопроса, ни pipe — спрашиваем интерактивно.
+	if question == "" && piped == "" {
+		question = promptForQuestion()
+		if question == "" {
+			ui.Err("пустой вопрос — выход")
 			os.Exit(1)
 		}
-		if len(strings.TrimSpace(string(data))) == 0 {
-			c, hookErr := shellhook.ReadCapture()
-			if hookErr != nil {
-				ui.Warn(hookErr.Error())
-				ui.Info("совет: установи хук — wtf init")
-				ui.Info("или запайпь вывод: <команда> 2>&1 | wtf")
-				os.Exit(2)
-			}
-			cap = c
-			break
-		}
-		cap = &shellhook.Capture{Output: string(data), Source: "pipe"}
-	case *rerun:
-		meta, _ := shellhook.ReadCapture()
-		if meta == nil || meta.Command == "" {
-			ui.Err("нечего перезапускать — нет последней команды")
-			os.Exit(1)
-		}
-		ui.Step(fmt.Sprintf("перезапуск: %s", meta.Command))
-		c, err := shellhook.Rerun(meta.Command)
-		if err != nil {
-			ui.Err(fmt.Sprintf("rerun: %v", err))
-			os.Exit(1)
-		}
-		cap = c
-	default:
-		c, err := shellhook.ReadCapture()
-		if err != nil {
-			ui.Warn(err.Error())
-			ui.Info("совет: установи хук — wtf init")
-			ui.Info("или: wtf --rerun (перезапустит последнюю команду)")
-			ui.Info("или: wtf --explain \"<текст ошибки>\"")
-			os.Exit(2)
-		}
-		cap = c
 	}
 
-	if strings.TrimSpace(cap.Output) == "" && cap.Command != "" {
-		// Хук пока пишет только metadata (cmd + exit). Сам stdout/stderr
-		// он не сохраняет — на это нужен `script(1)`-обёртка, она в roadmap.
-		// Поэтому здесь — внятное сообщение, а не silent rerun: rerun небезопасен
-		// для side-effect команд (rm, kubectl apply, git push) и виснет на pager'ах.
-		ui.Warn("вывод последней команды не захвачен")
-		ui.Info(fmt.Sprintf("команда: %s", cap.Command))
-		fmt.Fprintln(os.Stderr)
-		ui.Info("варианты:")
-		fmt.Fprintln(os.Stderr, "    wtf --rerun                       перезапустить последнюю команду (если она безопасна)")
-		fmt.Fprintln(os.Stderr, "    <команда> 2>&1 | wtf              запайпить вывод напрямую")
-		fmt.Fprintln(os.Stderr, "    wtf --explain \"<текст>\"           передать текст вручную")
-		os.Exit(2)
-	}
-
-	info := wctx.Collect()
-	red := redact.Apply(cap.Output)
-
-	if !cfg.RedactionShown {
-		showFirstRunNotice(cfg, red, info, cap)
-	} else if summary := redact.Summary(red); summary != "" {
-		ui.Info(summary)
-	}
-
-	req := provider.Request{
-		Language:    language,
-		OS:          info.OS,
-		Shell:       info.Shell,
-		Cwd:         info.Cwd,
-		GitBranch:   info.GitBranch,
-		PkgManager:  info.PkgManager,
-		LastCommand: cap.Command,
-		ExitCode:    cap.ExitCode,
-		Output:      red.Text,
-	}
-
-	model := cfg.Model(prov)
-	cacheKey := cache.Key(string(prov), model, language, req.Output, req.LastCommand)
-	if cfg.CacheEnabled && !*noCache {
-		if e, ok := cache.Get(cacheKey); ok {
-			ui.Info(fmt.Sprintf("[cached • %s • %s]", e.Provider, e.Model))
-			fmt.Println()
-			fmt.Println(render.Markdown(e.Answer))
-			return
-		}
-	}
-
-	client, err := provider.New(cfg, prov)
+	cli, err := provider.New(cfg, prov)
 	if err != nil {
 		ui.Err(fmt.Sprintf("провайдер %s недоступен: %v", prov, err))
 		ui.Info("настрой ключ: wtf config")
 		os.Exit(2)
 	}
 
-	start := time.Now()
-	sp := ui.NewSpinner(t(language, "Читаю stderr...", "Reading stderr..."))
-	sp.Start()
-	time.Sleep(180 * time.Millisecond)
-	sp.Update(t(language, "Собираю контекст (OS, shell, git)...", "Collecting context (OS, shell, git)..."))
-	time.Sleep(180 * time.Millisecond)
-	sp.Update(t(language,
-		fmt.Sprintf("Чищу секреты (regex × %d правил)...", len(red.Hits)+13),
-		"Redacting secrets..."))
-	time.Sleep(180 * time.Millisecond)
-	sp.Update(t(language,
-		fmt.Sprintf("Запрос в %s (%s)...", client.Name(), model),
-		fmt.Sprintf("Calling %s (%s)...", client.Name(), model)))
-
-	// Через 600мс после старта запроса — переключаем текст на "получаю ответ"
-	// чтобы спиннер не "врал" что мы всё ещё отправляем.
-	switchCtx, switchCancel := stdctx.WithCancel(stdctx.Background())
-	defer switchCancel()
-	go func() {
-		select {
-		case <-switchCtx.Done():
-		case <-time.After(700 * time.Millisecond):
-			sp.Update(t(language, "Получаю ответ...", "Receiving response..."))
-		}
-	}()
-
-	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 90*time.Second)
-	defer cancel()
-	answer, err := client.Explain(ctx, req)
-	switchCancel()
+	store, err := memory.Load()
 	if err != nil {
-		sp.StopFail(fmt.Sprintf("%s: %v", client.Name(), err))
+		ui.Warn(fmt.Sprintf("память не загрузилась: %v (продолжаю без неё)", err))
+		store = &memory.Store{}
+	}
+
+	envInfo := wctx.Collect()
+
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 5*time.Minute)
+	defer cancel()
+
+	io := &consoleIO{}
+
+	res, err := agent.Run(ctx, cli, envInfo, store, io, question, piped, lang)
+	if err != nil {
+		ui.Err(fmt.Sprintf("агент: %v", err))
 		os.Exit(1)
 	}
-	elapsed := time.Since(start)
-	sp.StopOK(fmt.Sprintf("Готово · %s · %s", fmtDur(elapsed), client.Name()))
 
-	if cfg.CacheEnabled && !*noCache {
-		_ = cache.Put(cache.Entry{
-			Key:       cacheKey,
-			Provider:  string(prov),
-			Model:     model,
-			Language:  language,
-			Answer:    answer,
-			CreatedAt: time.Now(),
-		})
+	// Записываем notes в память, если они есть.
+	if len(res.Notes) > 0 {
+		for _, n := range res.Notes {
+			store.Add(n)
+		}
+	}
+	needConsolidation := store.MarkSession()
+
+	if err := store.Save(); err != nil {
+		ui.Warn(fmt.Sprintf("не удалось сохранить память: %v", err))
 	}
 
-	fmt.Println()
-	fmt.Println(render.Markdown(answer))
+	// Консолидация — best-effort. Если упала — не страшно, в следующий раз попробуем.
+	if needConsolidation {
+		ui.Info("сжимаю память...")
+		consCtx, ccancel := stdctx.WithTimeout(stdctx.Background(), 60*time.Second)
+		if err := agent.Consolidate(consCtx, cli, store); err != nil {
+			ui.Warn(fmt.Sprintf("консолидация: %v", err))
+		} else {
+			_ = store.Save()
+		}
+		ccancel()
+	}
+
+	if res.Stopped == "max_iterations" {
+		ui.Warn(fmt.Sprintf("достигнут лимит раундов диагностики (%d)", agent.MaxIterations))
+	}
 }
 
-// hasPipedStdin — true если stdin это пайп/файл, не интерактивный терминал.
-// Используется для поддержки `<команда> 2>&1 | wtf` без явных флагов.
-func hasPipedStdin() bool {
-	return !term.IsTerminal(int(os.Stdin.Fd()))
+// readPipedStdin — если stdin не TTY, читаем всё содержимое.
+// Используется для `cat err.log | wtf что не так`.
+func readPipedStdin() string {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		return ""
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(data))
+	// Лимит 16 КБ — больше всё равно бесполезно, AI будет тонуть в шуме.
+	const maxStdin = 16 * 1024
+	if len(s) > maxStdin {
+		s = s[len(s)-maxStdin:]
+	}
+	return s
+}
+
+// promptForQuestion — fallback когда юзер запустил `wtf` без аргументов
+// и без pipe. Просим описать проблему.
+func promptForQuestion() string {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return ""
+	}
+	r := bufio.NewReader(os.Stdin)
+	return ui.Prompt(r, "опиши проблему", "")
+}
+
+// consoleIO — реализация agent.IO для обычного терминала.
+type consoleIO struct {
+	sp *ui.Spinner
+}
+
+func (c *consoleIO) Thinking(label string) {
+	c.sp = ui.NewSpinner(label)
+	c.sp.Start()
+}
+
+func (c *consoleIO) StopThinking(success bool, _ string) {
+	if c.sp == nil {
+		return
+	}
+	if success {
+		c.sp.StopOK("")
+	} else {
+		c.sp.StopFail("")
+	}
+	c.sp = nil
+}
+
+func (c *consoleIO) StepCommand(reason, command string) {
+	ui.CommandHeader(reason, command)
+}
+
+func (c *consoleIO) CommandOutput(_ string, output string, exit int, dur time.Duration, timedOut bool) {
+	ui.CommandResult(output, exit, dur, timedOut)
+}
+
+func (c *consoleIO) UserCommand(reason, command string) {
+	ui.UserCommandBlock(reason, command)
+}
+
+func (c *consoleIO) Refused(command, reason string) {
+	ui.RefusedBlock(command, reason)
+}
+
+func (c *consoleIO) Final(summary string) {
+	ui.FinalBlock(render.Markdown(summary))
 }
 
 func anyKeyConfigured(cfg *config.Config) bool {
@@ -275,151 +275,7 @@ func anyKeyConfigured(cfg *config.Config) bool {
 	return false
 }
 
-func showFirstRunNotice(cfg *config.Config, r redact.Result, info wctx.Info, cap *shellhook.Capture) {
-	box := ui.Box{
-		Title: "wtf · что отправляется на сервер",
-		Lines: []string{
-			fmt.Sprintf("OS:           %s", info.OS),
-			fmt.Sprintf("Shell:        %s", info.Shell),
-			fmt.Sprintf("Cwd:          %s", redact.Apply(info.Cwd).Text),
-			fmt.Sprintf("Git branch:   %s", nz(info.GitBranch)),
-			fmt.Sprintf("PkgManager:   %s", nz(info.PkgManager)),
-			fmt.Sprintf("Команда:      %s", nz(cap.Command)),
-			fmt.Sprintf("Exit code:    %d", cap.ExitCode),
-			fmt.Sprintf("Вывод:        %d байт (после редакции)", len(r.Text)),
-		},
-	}
-	if summary := redact.Summary(r); summary != "" {
-		box.Lines = append(box.Lines, "Удалено:      "+summary)
-	}
-	box.Lines = append(box.Lines, "")
-	box.Lines = append(box.Lines, "Токены, пароли, email, JWT, ключи — отфильтрованы regex'ом.")
-	box.Lines = append(box.Lines, "Это уведомление показывается один раз.")
-	box.Render(os.Stderr)
-	cfg.RedactionShown = true
-	_ = cfg.Save()
-}
-
-func nz(s string) string {
-	if s == "" {
-		return "—"
-	}
-	return s
-}
-
-func runInit(args []string) {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	noReload := fs.Bool("no-reload", false, "не запускать новый shell после установки")
-	_ = fs.Parse(args)
-
-	var s shellhook.Shell
-	if fs.NArg() > 0 {
-		s = shellhook.Shell(fs.Arg(0))
-	} else {
-		s = shellhook.DetectInstall()
-		ui.Info(fmt.Sprintf("обнаружен shell: %s", s))
-	}
-	rc, err := shellhook.Install(s)
-	if err != nil {
-		ui.Err(fmt.Sprintf("install: %v", err))
-		os.Exit(1)
-	}
-	ui.OK(fmt.Sprintf("shell-хук установлен в %s", rc))
-
-	cfg, _ := config.Load()
-	if !anyKeyConfigured(cfg) {
-		ui.Warn("API ключ не настроен. Запусти: wtf config")
-	}
-
-	if *noReload {
-		ui.Info("перезапусти shell или выполни:")
-		fmt.Fprintln(os.Stderr, "    "+reloadCommand(s))
-		return
-	}
-
-	// Авто-подгрузка через exec — заменяем процесс `wtf init` на свежий interactive
-	// shell, который сам прочитает обновлённый rc. Юзер не делает руками source.
-	// Не работает на Windows для unix-shell'ов и в неинтерактивных контекстах
-	// (например `wtf init` запущен из install.sh через pipe).
-	if !canExecReload(s) {
-		ui.Info("перезапусти shell или выполни:")
-		fmt.Fprintln(os.Stderr, "    "+reloadCommand(s))
-		return
-	}
-
-	ui.OK("перезапускаю shell с активным хуком — пиши `wtfc <команда>` или `exit` чтобы выйти")
-	fmt.Fprintln(os.Stderr)
-	if err := execReload(s); err != nil {
-		ui.Warn(fmt.Sprintf("не удалось авто-перезапустить shell: %v", err))
-		ui.Info("выполни вручную: " + reloadCommand(s))
-	}
-}
-
-// canExecReload — можно ли перезапустить shell автоматически.
-// Условия: stdin/stdout/stderr — TTY, исполняемый файл shell найден, ОС
-// поддерживается. Запуск из неинтерактивного pipe (например 'curl … | bash → wtf init')
-// исключён, иначе shell стартует и тут же выйдет.
-func canExecReload(s shellhook.Shell) bool {
-	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return false
-	}
-	bin := shellBinary(s)
-	if bin == "" {
-		return false
-	}
-	if _, err := exec.LookPath(bin); err != nil {
-		return false
-	}
-	return true
-}
-
-// execReload запускает новый interactive shell, унаследовав stdin/stdout/stderr.
-// `wtf init` ждёт его выхода, потом сам завершается. Когда юзер делает `exit` —
-// он попадает обратно в исходный shell (в котором хук ещё не загружен, но новые
-// окна терминала будут стартовать с хуком из rc-файла).
-func execReload(s shellhook.Shell) error {
-	bin := shellBinary(s)
-	args := []string{"-i"} // -i = interactive
-	if s == shellhook.ShellPowerShell {
-		args = []string{"-NoExit"}
-	}
-	c := exec.Command(bin, args...)
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	return c.Run()
-}
-
-func shellBinary(s shellhook.Shell) string {
-	switch s {
-	case shellhook.ShellBash:
-		return "bash"
-	case shellhook.ShellZsh:
-		return "zsh"
-	case shellhook.ShellFish:
-		return "fish"
-	case shellhook.ShellPowerShell:
-		if _, err := exec.LookPath("pwsh"); err == nil {
-			return "pwsh"
-		}
-		return "powershell"
-	}
-	return ""
-}
-
-func reloadCommand(s shellhook.Shell) string {
-	switch s {
-	case shellhook.ShellBash:
-		return "source ~/.bashrc"
-	case shellhook.ShellZsh:
-		return "source ~/.zshrc"
-	case shellhook.ShellFish:
-		return "source ~/.config/fish/conf.d/wtf.fish"
-	case shellhook.ShellPowerShell:
-		return ". $PROFILE"
-	}
-	return ""
-}
+// === wtf config ===
 
 func runConfig(args []string) {
 	cfg, err := config.Load()
@@ -451,7 +307,6 @@ func showConfig(cfg *config.Config) {
 	ui.Section("конфиг")
 	ui.KV("provider", string(cfg.DefaultProvider))
 	ui.KV("language", cfg.Language)
-	ui.KV("cache", fmt.Sprintf("%v", cfg.CacheEnabled))
 	fmt.Fprintln(os.Stderr)
 	ui.Section("провайдеры")
 	for _, p := range []config.Provider{config.ProviderClaude, config.ProviderOpenAI, config.ProviderGemini} {
@@ -477,8 +332,6 @@ func setConfig(cfg *config.Config, kv string) {
 		cfg.DefaultProvider = config.Provider(v)
 	case k == "language", k == "lang":
 		cfg.Language = v
-	case k == "cache":
-		cfg.CacheEnabled = v == "true" || v == "1" || v == "on"
 	case strings.HasPrefix(k, "claude."), strings.HasPrefix(k, "openai."), strings.HasPrefix(k, "gemini."):
 		parts := strings.SplitN(k, ".", 2)
 		p := config.Provider(parts[0])
@@ -514,13 +367,10 @@ func runWizard(cfg *config.Config) {
 	cfg.Language = ui.Choice(r, "Язык ответа",
 		[]string{"ru", "en"}, cfg.Language)
 
-	// Сначала настраиваем выбранного провайдера. Других не трогаем —
-	// после первой настройки спрашиваем, нужно ли добавить ещё.
 	configureProvider(r, cfg, cfg.DefaultProvider)
 
 	allProviders := []config.Provider{config.ProviderClaude, config.ProviderOpenAI, config.ProviderGemini}
 	for {
-		// Какие ещё провайдеры можно добавить — те, у которых ключ не задан.
 		var remaining []string
 		for _, p := range allProviders {
 			if p == cfg.DefaultProvider {
@@ -548,9 +398,7 @@ func runWizard(cfg *config.Config) {
 	fmt.Fprintln(os.Stderr)
 	ui.OK("конфиг сохранён в ~/.wtf/config.json")
 
-	if anyKeyConfigured(cfg) {
-		ui.Info("следующий шаг: wtf init  (установить shell-хук)")
-	} else {
+	if !anyKeyConfigured(cfg) {
 		ui.Warn("ни одного ключа не задано — wtf не сможет работать")
 	}
 }
@@ -581,18 +429,38 @@ func configureProvider(r *bufio.Reader, cfg *config.Config, p config.Provider) {
 	}
 }
 
-func t(lang, ru, en string) string {
-	if lang == "ru" {
-		return ru
-	}
-	return en
-}
+// === wtf memory ===
 
-func fmtDur(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
+func runMemoryCmd(args []string) {
+	if len(args) == 0 {
+		ui.Err("usage: wtf memory show|clear")
+		os.Exit(1)
 	}
-	return fmt.Sprintf("%.1fs", d.Seconds())
+	store, err := memory.Load()
+	if err != nil {
+		ui.Err(fmt.Sprintf("memory: %v", err))
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "show":
+		if len(store.Entries) == 0 {
+			ui.Info("память пуста")
+			return
+		}
+		fmt.Println(store.SystemContext(0))
+		fmt.Printf("\n[всего записей: %d, сессий: %d]\n", len(store.Entries), store.SessionCount)
+	case "clear":
+		store.Entries = nil
+		store.SessionCount = 0
+		if err := store.Save(); err != nil {
+			ui.Err(fmt.Sprintf("save: %v", err))
+			os.Exit(1)
+		}
+		ui.OK("память очищена")
+	default:
+		ui.Err(fmt.Sprintf("неизвестная подкоманда: %s", args[0]))
+		os.Exit(1)
+	}
 }
 
 func mask4(s string) string {

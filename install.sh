@@ -154,9 +154,9 @@ do_install() {
   printf "\n"
   printf "  %s[!?] готово!%s\n\n" "$C_BOLD" "$C_RESET"
   printf "  Дальше:\n"
-  printf "    %s$%s wtf config       %s# настроить провайдера и ключ%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
-  printf "    %s$%s wtf init         %s# поставить shell-хук%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
-  printf "    %s$%s wtf              %s# объяснить последнюю ошибку%s\n\n" "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "    %s$%s wtf config              %s# настроить провайдера и ключ%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "    %s$%s wtf nginx не стартует   %s# запустить диагностику%s\n" "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "    %s$%s wtf memory show         %s# что агент о тебе помнит%s\n\n" "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
 }
 
 case "$MODE" in
